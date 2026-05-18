@@ -34,9 +34,8 @@ class ServoController:
     def _init_hardware(self):
         try:
             import board
-            import busio
             from adafruit_pca9685 import PCA9685
-            i2c = busio.I2C(board.SCL, board.SDA)
+            i2c = board.I2C()  # auto-detects the correct I2C bus for this board
             self._pca = PCA9685(i2c)
             self._pca.frequency = self.freq
             print("[Servo] PCA9685 initialisiert")
