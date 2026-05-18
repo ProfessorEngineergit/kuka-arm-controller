@@ -3,8 +3,11 @@
 # Run as root: sudo bash setup.sh
 set -e
 
-APP_DIR="/home/pi/kuka-arm"
+# Detect the real user who called sudo (falls back to pi)
+REAL_USER="${SUDO_USER:-pi}"
+APP_DIR="/home/${REAL_USER}/kuka-arm"
 echo "=== KUKA-ARM Setup ==="
+echo "Benutzer:                 $REAL_USER"
 echo "Installationsverzeichnis: $APP_DIR"
 
 # ── 0. .env erzeugen falls fehlend ──────────────────────────
@@ -36,8 +39,8 @@ if [ -f /boot/firmware/config.txt ] && ! grep -q "dtparam=i2c_arm=on" /boot/firm
   echo "dtparam=i2c_arm=on" >> /boot/firmware/config.txt
 fi
 modprobe i2c-dev 2>/dev/null || true
-if ! id -nG pi | grep -qw i2c; then
-  usermod -aG i2c pi
+if ! id -nG "$REAL_USER" | grep -qw i2c; then
+  usermod -aG i2c "$REAL_USER"
 fi
 
 # ── 3. Python Virtual Environment ────────────────────────────
@@ -52,7 +55,7 @@ deactivate
 # ── 4. Verzeichnisse & Berechtigungen ────────────────────────
 echo "[4/6] Berechtigungen setzen..."
 mkdir -p "$APP_DIR/config/programs"
-chown -R pi:pi "$APP_DIR"
+chown -R "$REAL_USER:$REAL_USER" "$APP_DIR"
 chmod +x "$APP_DIR/start.sh"
 chmod +x "$APP_DIR/setup_hotspot.sh"
 
@@ -62,7 +65,25 @@ bash "$APP_DIR/setup_hotspot.sh"
 
 # ── 6. Systemd Service ────────────────────────────────────────
 echo "[6/6] Systemd-Service einrichten..."
-cp "$APP_DIR/kuka-arm.service" /etc/systemd/system/kuka-arm.service
+cat > /etc/systemd/system/kuka-arm.service <<EOF
+[Unit]
+Description=KUKA-ARM Roboter-Controller
+After=network.target hostapd.service
+
+[Service]
+Type=simple
+User=${REAL_USER}
+WorkingDirectory=${APP_DIR}
+ExecStart=${APP_DIR}/start.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
 systemctl daemon-reload
 systemctl enable kuka-arm.service
 

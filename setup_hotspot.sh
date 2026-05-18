@@ -3,9 +3,11 @@
 # Reads WIFI_SSID and WIFI_PASSWORD from .env
 set -e
 
-# Load .env
-if [ -f /home/pi/kuka-arm/.env ]; then
-  export $(grep -v '^#' /home/pi/kuka-arm/.env | xargs)
+# Load .env (support any username via SUDO_USER)
+REAL_USER="${SUDO_USER:-pi}"
+APP_DIR="/home/${REAL_USER}/kuka-arm"
+if [ -f "$APP_DIR/.env" ]; then
+  export $(grep -v '^#' "$APP_DIR/.env" | xargs)
 fi
 
 SSID="${WIFI_SSID:-KUKA-ARM}"
