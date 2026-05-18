@@ -1,26 +1,15 @@
-// Coordinate frame management UI
-function setFrame(frame) {
-  if (frame !== 'WORLD' && frame !== 'TCP') return;
-  sendWS({type: 'frame', frame});
-  logEntry(`Frame → ${frame}`, 'info');
-}
-
+// Frame switching – called from ui.js setFrame()
 function updateFrameUI() {
-  const frame = State.frame;
+  const f = State.frame;
+  const ind = document.getElementById('frame-indicator');
+  const vbg = document.getElementById('vp-frame-badge');
+  const cpl = document.getElementById('cp-frame-label');
+  if (ind) ind.textContent = f;
+  if (vbg) vbg.textContent = f;
+  if (cpl) cpl.textContent = f;
 
-  // Right panel select
-  const sel = document.getElementById('frame-select');
-  if (sel) sel.value = frame;
-
-  // Viewport badge
-  const badge = document.getElementById('frame-badge');
-  if (badge) badge.textContent = frame;
-
-  // Coordinate panel cards
-  const worldCheck = document.getElementById('frame-world-check');
-  const tcpCheck   = document.getElementById('frame-tcp-check');
-  if (worldCheck) worldCheck.textContent = frame === 'WORLD' ? '●' : '○';
-  if (tcpCheck)   tcpCheck.textContent   = frame === 'TCP'   ? '●' : '○';
-  if (worldCheck) worldCheck.style.color = frame === 'WORLD' ? 'var(--orange)' : 'var(--text-dim)';
-  if (tcpCheck)   tcpCheck.style.color   = frame === 'TCP'   ? 'var(--orange)' : 'var(--text-dim)';
+  const wBtn = document.getElementById('frame-world-btn');
+  const tBtn = document.getElementById('frame-tcp-btn');
+  if (wBtn) wBtn.className = 'mode-badge' + (f === 'WORLD' ? ' active' : '');
+  if (tBtn) tBtn.className = 'mode-badge' + (f === 'TCP'   ? ' active' : '');
 }

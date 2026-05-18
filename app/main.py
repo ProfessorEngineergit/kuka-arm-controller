@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.routes.api import router as api_router
@@ -30,34 +30,16 @@ async def _inactivity_watchdog():
             robot.enabled = False
             from app.servo_controller import servo
             servo.stop_all()
-            await robot.broadcast({
-                "type": "warning",
-                "msg": "Inaktivitäts-Timeout: Arm deaktiviert",
-            })
+            await robot.broadcast({"type": "warning", "msg": "Inaktivitäts-Timeout: Arm deaktiviert"})
             await robot.broadcast_state()
 
 
 app = FastAPI(title="KUKA-ARM Controller", lifespan=lifespan)
-
 app.include_router(api_router)
 app.include_router(ws_router)
-
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
-async def root(request: Request):
-    from app.auth import get_token_from_request, validate_token
-    token = get_token_from_request(request)
-    if validate_token(token):
-        return FileResponse("static/app.html")
-    return FileResponse("static/index.html")
-
-
-@app.get("/app")
-async def app_page(request: Request):
-    from app.auth import get_token_from_request, validate_token
-    token = get_token_from_request(request)
-    if not validate_token(token):
-        return RedirectResponse("/")
+async def root():
     return FileResponse("static/app.html")
