@@ -1,6 +1,6 @@
 #!/bin/bash
 # Start the KUKA-ARM controller
-APP_DIR="/home/pi/kuka-arm"
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$APP_DIR"
 
 source venv/bin/activate

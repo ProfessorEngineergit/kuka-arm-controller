@@ -70,7 +70,7 @@ echo "[6/6] Systemd-Service einrichten..."
 cat > /etc/systemd/system/kuka-arm.service <<EOF
 [Unit]
 Description=KUKA-ARM Roboter-Controller
-After=network.target hostapd.service
+After=network.target NetworkManager.service
 
 [Service]
 Type=simple
