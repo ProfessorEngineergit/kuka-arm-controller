@@ -78,6 +78,7 @@ Type=simple
 User=${REAL_USER}
 WorkingDirectory=${APP_DIR}
 ExecStart=${APP_DIR}/start.sh
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 Restart=always
 RestartSec=5
 StandardOutput=journal
