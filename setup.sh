@@ -27,7 +27,8 @@ fi
 # ── 1. System-Pakete ────────────────────────────────────────
 echo "[1/6] System-Pakete installieren..."
 apt-get update -q
-apt-get install -y python3 python3-pip python3-venv git i2c-tools
+apt-get install -y python3 python3-pip python3-venv git i2c-tools \
+  python3-numpy python3-scipy
 
 # ── 2. I²C aktivieren ────────────────────────────────────────
 echo "[2/6] I²C aktivieren..."
@@ -46,10 +47,11 @@ fi
 # ── 3. Python Virtual Environment ────────────────────────────
 echo "[3/6] Python-Umgebung einrichten..."
 cd "$APP_DIR"
-python3 -m venv venv
+# --system-site-packages lets the venv use apt-installed numpy/scipy
+python3 -m venv --system-site-packages venv
 source venv/bin/activate
 pip install --upgrade pip -q
-pip install --extra-index-url https://www.piwheels.org/simple -r requirements.txt -q
+pip install -r requirements.txt -q
 deactivate
 
 # ── 4. Verzeichnisse & Berechtigungen ────────────────────────
