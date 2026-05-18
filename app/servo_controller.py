@@ -1,6 +1,6 @@
 import asyncio
 import yaml
-from typing import List
+from typing import List, Callable, Optional
 
 _config = None
 
@@ -9,6 +9,14 @@ def _load_config():
     if _config is None:
         with open("config/robot.yaml") as f:
             _config = yaml.safe_load(f)
+    return _config
+
+
+def _reload_config():
+    """Force re-read of robot.yaml from disk (after calibration / backup restore)."""
+    global _config
+    with open("config/robot.yaml") as f:
+        _config = yaml.safe_load(f)
     return _config
 
 
@@ -77,13 +85,40 @@ class ServoController:
         self.set_all(angles)
         return angles
 
-    async def move_to(self, current: List[float], target: List[float], speed_pct: float = 100.0) -> List[float]:
-        """Smoothly interpolate from current to target, respecting per-servo max speed."""
-        speed = self.default_speed * (speed_pct / 100.0)
-        max_delta = max(abs(t - c) for t, c in zip(target, current)) or 1
+    def reload_config(self):
+        """Reload joint limits / servo types after calibration or backup restore."""
+        cfg = _reload_config()
+        self.joints = cfg["joints"]
+        self.freq = cfg["servos"]["frequency"]
+        self.default_speed = cfg["servos"]["default_speed"]
+        self._servo_types = cfg["servos"]["types"]
+        if not self._mock and self._pca:
+            try:
+                self._pca.frequency = self.freq
+            except Exception:
+                pass
+
+    async def move_to(
+        self,
+        current: List[float],
+        target: List[float],
+        speed_pct: float = 100.0,
+        should_abort: Optional[Callable[[], bool]] = None,
+    ) -> List[float]:
+        """Smoothly interpolate from current to target, respecting per-servo max speed.
+
+        If ``should_abort()`` returns True at any point (E-Stop / disable), motion
+        stops immediately, PWM is cut, and the last commanded position is returned
+        so robot_state stays consistent with the physical arm.
+        """
+        speed = max(0.1, self.default_speed * (speed_pct / 100.0))
+        max_delta = max((abs(t - c) for t, c in zip(target, current)), default=0) or 1
         steps = max(1, int(max_delta / speed * 20))  # 20 Hz update rate
         result = list(current)
         for i in range(1, steps + 1):
+            if should_abort is not None and should_abort():
+                self.stop_all()  # cut PWM – do NOT re-energize after E-Stop
+                return result
             t = i / steps
             result = [c + (tgt - c) * t for c, tgt in zip(current, target)]
             self.set_all(result)

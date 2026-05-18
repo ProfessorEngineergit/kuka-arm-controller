@@ -768,3 +768,371 @@ body {
 ::-webkit-scrollbar-track { background: var(--bg1); }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--orange2); }
+
+/* ═══════════════════════════════════════════════════════════
+   RESPONSIVE DESIGN – Tablet & Mobile
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── Tablet Layout (768px - 1023px) ─────────────────────── */
+@media (max-width: 1023px) {
+  /* Reduce left panel width */
+  #left-panel {
+    width: 150px;
+  }
+
+  /* Reduce right panel width */
+  #right-panel {
+    width: 100px;
+  }
+
+  /* Smaller status bar */
+  #status-bar {
+    height: 30px;
+    padding: 0 8px;
+    gap: 8px;
+  }
+
+  .led { width: 8px; height: 8px; }
+  #sb-robot-name { font-size: 11px; }
+  #sb-kss { font-size: 9px; }
+  #sb-time { font-size: 10px; min-width: 45px; }
+
+  /* Reduce font sizes in menu */
+  .menu-item { font-size: 10px; padding: 6px 8px; gap: 4px; }
+  .nav-tab { font-size: 8px; padding: 5px 2px; }
+
+  /* Joystick zones slightly smaller */
+  .joy-zone {
+    width: 60px;
+    height: 32px;
+  }
+
+  /* Bottom bar more compact */
+  #bottom-bar {
+    height: 44px;
+    padding: 4px 8px;
+    gap: 6px;
+  }
+  #btn-estop { padding: 0 10px; height: 32px; font-size: 11px; }
+  #btn-enable { padding: 0 10px; height: 32px; font-size: 10px; }
+  #btn-home { padding: 0 8px; height: 32px; font-size: 10px; }
+  #btn-ack { padding: 0 10px; height: 32px; font-size: 10px; }
+
+  /* Reduce jog button sizes */
+  .jog-btn {
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+  .jog-axis { font-size: 10px; }
+  .jog-dir { font-size: 12px; }
+
+  /* Pose and joint panel smaller text */
+  .pose-key, .pose-val { font-size: 9px; }
+  .joint-key, .joint-val { font-size: 9px; }
+
+  /* Reduce content panel padding */
+  .content-panel { padding: 12px; }
+  .cp-title { font-size: 12px; margin-bottom: 10px; }
+
+  /* Reduce form sizes */
+  .calib-field input { width: 56px; font-size: 10px; }
+  .calib-row { padding: 6px 8px; gap: 6px; }
+  .jog-pair-label { font-size: 7px; }
+  .override-label { font-size: 7px; }
+  #override-value { font-size: 16px; }
+}
+
+/* ─── Mobile Layout (480px - 767px) ────────────────────── */
+@media (max-width: 767px) {
+  /* Switch to single-column layout */
+  #main-area {
+    flex-direction: column;
+  }
+
+  #left-panel {
+    width: 100%;
+    height: 140px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  /* Horizontal menu layout */
+  #nav-tabs {
+    flex-direction: column;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
+    width: 50px;
+  }
+  .nav-tab {
+    flex-direction: column;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    writing-mode: horizontal-tb;
+    transform: rotate(0deg);
+    padding: 4px 2px;
+    font-size: 7px;
+    min-width: 50px;
+  }
+
+  #menu-list {
+    flex: 1;
+    display: flex;
+    overflow-x: auto;
+    flex-direction: row;
+  }
+  .menu-item {
+    flex-shrink: 0;
+    min-width: 80px;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+
+  /* Stack pose and joint panels */
+  #pose-panel {
+    display: none;
+  }
+  #joint-panel {
+    flex: 1;
+    border-top: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    padding: 6px 8px;
+    min-width: 100px;
+    max-width: 150px;
+    overflow-y: auto;
+  }
+
+  /* Right panel becomes bottom section */
+  #right-panel {
+    display: none; /* Hide on very small screens, can be toggled */
+  }
+
+  /* Full-width viewport */
+  #viewport {
+    flex: 1;
+  }
+
+  /* Status bar adjustments */
+  #status-bar {
+    height: 28px;
+    padding: 0 6px;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .led { width: 7px; height: 7px; }
+  .led-group { gap: 3px; }
+  .status-divider { display: none; }
+
+  #sb-robot-name {
+    font-size: 10px;
+    order: 1;
+    flex-basis: 100%;
+    padding: 2px 0;
+  }
+  #sb-conn { font-size: 9px; order: 2; }
+  #sb-time { font-size: 9px; order: 3; min-width: 40px; }
+  #sb-spacer { order: 4; }
+
+  /* Bottom bar becomes horizontal touch controls */
+  #bottom-bar {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 4px;
+    gap: 4px;
+  }
+
+  #btn-estop {
+    padding: 0 8px;
+    height: 40px;
+    font-size: 10px;
+    flex: 0 0 auto;
+  }
+  #btn-enable, #btn-home, #btn-ack {
+    height: 40px;
+    padding: 0 8px;
+    font-size: 9px;
+  }
+
+  .joy-zone {
+    width: 100%;
+    height: 50px;
+    max-width: 180px;
+    flex-shrink: 0;
+  }
+
+  #bb-divider {
+    display: none;
+  }
+
+  /* Override panel styling */
+  #override-panel {
+    border-top: 1px solid var(--border);
+    padding: 4px 0;
+    margin-top: 4px;
+  }
+  .override-label { font-size: 7px; }
+  #override-value { font-size: 14px; }
+
+  /* Content panels full screen */
+  .content-panel {
+    padding: 10px;
+    font-size: 12px;
+  }
+  .cp-title { font-size: 11px; margin-bottom: 8px; }
+
+  /* Form elements touch-friendly */
+  .btn {
+    min-height: 44px;
+    padding: 10px;
+    font-size: 10px;
+  }
+
+  .form-input {
+    min-height: 44px;
+    font-size: 14px; /* Prevent zoom on iOS */
+    padding: 10px;
+  }
+
+  .jog-btn {
+    min-height: 44px;
+    padding: 8px;
+    font-size: 9px;
+  }
+
+  .calib-row {
+    flex-wrap: wrap;
+    padding: 8px;
+    gap: 6px;
+  }
+  .calib-inputs {
+    flex-wrap: wrap;
+    gap: 4px;
+    flex-basis: 100%;
+  }
+  .calib-field input {
+    width: 70px;
+    min-height: 40px;
+    font-size: 12px;
+  }
+
+  /* Cartesian buttons full width */
+  .cart-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .cart-btn {
+    min-height: 44px;
+    font-size: 10px;
+  }
+
+  /* Program list single column */
+  .prog-item {
+    min-height: 50px;
+    flex-wrap: wrap;
+  }
+
+  /* Log output readable on mobile */
+  #log-output {
+    font-size: 11px;
+    min-height: 150px;
+  }
+
+  /* Viewport overlays adjust */
+  #vp-top-left {
+    font-size: 9px;
+    padding: 4px 6px;
+  }
+
+  .vp-badge {
+    font-size: 8px;
+    padding: 3px 6px;
+  }
+
+  #vp-bottom {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  /* Joint bar text smaller */
+  .joint-row { padding: 2px 0; }
+  .joint-key { font-size: 9px; width: 18px; }
+  .joint-bar-bg { margin: 0 4px; height: 2px; }
+  .joint-val { font-size: 9px; width: 32px; }
+}
+
+/* ─── Extra Small Mobile (< 480px) ──────────────────────── */
+@media (max-width: 479px) {
+  /* Even more compact */
+  #status-bar { height: 26px; }
+  .led { width: 6px; height: 6px; }
+  #sb-robot-name { font-size: 9px; }
+  #sb-time { font-size: 8px; min-width: 35px; }
+
+  #left-panel { height: 120px; }
+
+  .menu-item { min-width: 70px; font-size: 9px; }
+  .nav-tab { font-size: 6px; min-width: 45px; }
+
+  #nav-tabs { width: 45px; }
+
+  #bottom-bar { gap: 2px; }
+  #btn-estop { padding: 0 6px; height: 38px; font-size: 9px; }
+
+  .joy-zone { height: 45px; max-width: 160px; }
+
+  .btn { font-size: 9px; padding: 8px; min-height: 40px; }
+  .form-input { font-size: 13px; min-height: 40px; padding: 8px; }
+
+  .cart-grid { grid-template-columns: repeat(2, 1fr); gap: 3px; }
+  .cart-btn { min-height: 40px; font-size: 9px; padding: 6px 0; }
+
+  #log-output { font-size: 10px; min-height: 120px; }
+
+  .calib-field input { width: 60px; font-size: 11px; min-height: 36px; }
+
+  .content-panel { padding: 8px; }
+  .cp-title { font-size: 10px; margin-bottom: 6px; }
+}
+
+/* ─── Calibration Wizard Styles ────────────────────────── */
+.wizard-step {
+  display: flex;
+}
+
+#wizard-initial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+#wizard-content {
+  width: 100%;
+}
+
+.wizard-step {
+  flex-direction: column;
+  gap: 10px;
+}
+
+#wizard-joint-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+#wizard-step-limits {
+  gap: 12px;
+}
+
+#wizard-summary-list > div {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+#wizard-summary-list > div:last-child {
+  border-bottom: none;
+}

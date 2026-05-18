@@ -128,18 +128,38 @@ async def _execute_step(step: dict):
         await robot.broadcast_state()
 
     elif stype == "jog":
-        joint_id = step["joint"]
-        target_angle = float(step["target"])
+        try:
+            joint_id = int(step["joint"])
+            target_angle = float(step["target"])
+        except (KeyError, TypeError, ValueError):
+            return
+        if not (0 <= joint_id < len(robot.joints)):
+            return  # ignore poisoned / out-of-range step (e.g. from a restored backup)
+        target_angle = max(0.0, min(180.0, target_angle))
         speed = float(step.get("speed", 30))
         current = list(robot.joints)
         targets = list(current)
         targets[joint_id] = target_angle
-        new_joints = await servo.move_to(current, targets, speed_pct=min(100, speed / servo.default_speed * 100))
+        new_joints = await servo.move_to(
+            current, targets,
+            speed_pct=min(100, speed / servo.default_speed * 100),
+            should_abort=lambda: robot.estop or not robot.enabled,
+        )
         robot.joints = new_joints
         from app.coordinate_frames import compute_pose
         robot.pose = compute_pose(robot.joints)
         await robot.broadcast_state()
 
     elif stype == "wait":
-        ms = int(step.get("ms", 100))
-        await asyncio.sleep(ms / 1000)
+        try:
+            ms = int(step.get("ms", 100))
+        except (TypeError, ValueError):
+            ms = 100
+        ms = max(0, min(60_000, ms))  # cap so a program can't sleep forever
+        # Break the wait into slices so E-Stop interrupts promptly.
+        waited = 0
+        while waited < ms:
+            if robot.estop or not robot.enabled:
+                return
+            await asyncio.sleep(min(0.1, (ms - waited) / 1000))
+            waited += 100

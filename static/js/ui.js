@@ -315,3 +315,57 @@ function applyState(data) {
   if (typeof updateJointBars  === 'function') updateJointBars();
   if (typeof updateRobot3D    === 'function') updateRobot3D();
 }
+
+// ── Backup / Restore ────────────────────────────────────────
+async function exportBackup() {
+  try {
+    const resp = await fetch('/api/backup/export');
+    if (!resp.ok) { logEntry('Backup-Export fehlgeschlagen', 'err'); return; }
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = resp.headers.get('content-disposition')?.split('filename=')[1]?.trim() || 'kuka-backup.zip';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    logEntry('Backup exportiert ✓', 'ok');
+  } catch (e) {
+    logEntry('Backup-Export Fehler: ' + e.message, 'err');
+  }
+}
+
+function triggerRestoreUpload() {
+  document.getElementById('restore-file-input').click();
+}
+
+async function importBackup(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const resp = await fetch('/api/backup/import', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      logEntry('Fehler: ' + (err.detail || 'Unbekannter Fehler'), 'err');
+      return;
+    }
+
+    logEntry('Backup wiederhergestellt ✓', 'ok');
+    // Reload config after restore
+    location.reload();
+  } catch (e) {
+    logEntry('Backup-Import Fehler: ' + e.message, 'err');
+  }
+
+  // Clear file input
+  event.target.value = '';
+}

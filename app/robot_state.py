@@ -13,6 +13,17 @@ def get_config():
     return _config
 
 
+def reload_config():
+    """Force re-read of robot.yaml after calibration / backup restore, and
+    propagate the new limits to the live servo controller."""
+    global _config
+    with open("config/robot.yaml") as f:
+        _config = yaml.safe_load(f)
+    from app.servo_controller import servo
+    servo.reload_config()
+    return _config
+
+
 class RobotState:
     def __init__(self):
         cfg = get_config()
@@ -26,6 +37,9 @@ class RobotState:
         self.last_activity: float = time.time()
         self._websockets: Set = set()
         self._lock = asyncio.Lock()
+        # Serializes physical motion so concurrent clients/tabs cannot issue
+        # conflicting servo commands at the same time.
+        self.motion_lock = asyncio.Lock()
 
     def touch(self):
         self.last_activity = time.time()
