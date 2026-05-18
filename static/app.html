@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KUKA-ARM Controller</title>
+  <link rel="stylesheet" href="/static/css/kuka.css">
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────── -->
+<div id="header">
+  <span class="logo">KUKA</span>
+  <span class="status-dot" id="status-dot"></span>
+  <span class="status-label" id="status-label">GETRENNT</span>
+  <div class="spacer"></div>
+  <span id="header-estop-badge" style="display:none; color:#ff4422; font-weight:700; font-size:12px; letter-spacing:1px; margin-right:12px;">⚠ E-STOP AKTIV</span>
+  <button id="btn-logout" onclick="logout()">Abmelden</button>
+</div>
+
+<!-- ── E-Stop Bar (top) ───────────────────────────────────── -->
+<div class="estop-bar" id="estop-bar-top">
+  <button id="btn-estop" onclick="triggerEstop()">⬛ E-STOP</button>
+  <button id="btn-acknowledge" class="btn" onclick="acknowledgeEstop()">✓ Quittieren</button>
+  <span class="estop-msg" id="estop-msg"></span>
+</div>
+
+<!-- ── Main Layout ───────────────────────────────────────── -->
+<div id="main-layout">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <button class="sidebar-btn active" data-panel="viewport-mode" onclick="showPanel('jog')">Jog</button>
+    <button class="sidebar-btn" data-panel="cartesian" onclick="showPanel('cartesian')">Kartesisch</button>
+    <button class="sidebar-btn" data-panel="programs" onclick="showPanel('programs')">Programme</button>
+    <button class="sidebar-btn" data-panel="coordinate" onclick="showPanel('coordinate')">Koord.-Sys.</button>
+    <button class="sidebar-btn" data-panel="settings" onclick="showPanel('settings')">Einstellungen</button>
+    <button class="sidebar-btn" data-panel="calibration" onclick="showPanel('calibration')">Kalibrierung</button>
+    <button class="sidebar-btn" data-panel="log" onclick="showPanel('log')">Log</button>
+  </div>
+
+  <!-- Viewport + Content overlay -->
+  <div id="viewport">
+    <canvas id="three-canvas"></canvas>
+    <div class="viewport-overlay" id="viewport-overlay">
+      TCP: <span id="ov-x">0</span> | <span id="ov-y">0</span> | <span id="ov-z">0</span> mm
+    </div>
+    <div class="viewport-frame-badge" id="frame-badge">WORLD</div>
+
+    <!-- Content panels (overlay on viewport) -->
+    <div id="content-area">
+
+      <!-- Cartesian Panel -->
+      <div class="content-panel" id="panel-cartesian">
+        <div class="panel-header">Kartesisch Jog</div>
+        <p style="color:var(--text-secondary);font-size:12px;margin-bottom:16px;">
+          Bewegt den TCP im aktiven Koordinatensystem.
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div>
+            <div class="panel-title">Translation (mm/Klick)</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn" onclick="cartJog({dx:10})">+X</button>
+              <button class="btn" onclick="cartJog({dx:-10})">−X</button>
+              <button class="btn" onclick="cartJog({dy:10})">+Y</button>
+              <button class="btn" onclick="cartJog({dy:-10})">−Y</button>
+              <button class="btn" onclick="cartJog({dz:10})">+Z</button>
+              <button class="btn" onclick="cartJog({dz:-10})">−Z</button>
+            </div>
+          </div>
+          <div>
+            <div class="panel-title">Rotation (°/Klick)</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn" onclick="cartJog({da:5})">+A</button>
+              <button class="btn" onclick="cartJog({da:-5})">−A</button>
+              <button class="btn" onclick="cartJog({db:5})">+B</button>
+              <button class="btn" onclick="cartJog({db:-5})">−B</button>
+              <button class="btn" onclick="cartJog({dc:5})">+C</button>
+              <button class="btn" onclick="cartJog({dc:-5})">−C</button>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:16px;">
+          <div class="panel-title">Schrittweite</div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-orange" id="step-1" onclick="setStep(1)">1 mm/°</button>
+            <button class="btn" id="step-5" onclick="setStep(5)">5 mm/°</button>
+            <button class="btn" id="step-10" onclick="setStep(10)">10 mm/°</button>
+            <button class="btn" id="step-50" onclick="setStep(50)">50 mm/°</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Programs Panel -->
+      <div class="content-panel" id="panel-programs">
+        <div class="panel-header">Programme</div>
+        <div id="program-list"></div>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+          <div class="panel-title">Laufendes Programm</div>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+            <span id="running-prog-name" style="font-family:var(--font-mono);color:var(--orange);">—</span>
+            <button class="btn btn-red" onclick="stopProgram()" style="display:none" id="btn-stop-prog">STOPP</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Coordinate Panel -->
+      <div class="content-panel" id="panel-coordinate">
+        <div class="panel-header">Koordinatensystem</div>
+        <p style="color:var(--text-secondary);font-size:12px;margin-bottom:20px;">
+          Wähle das aktive Referenzsystem für Joystick und kartesische Steuerung.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:10px;max-width:360px;">
+          <div class="program-item" style="cursor:pointer;" onclick="setFrame('WORLD')" id="frame-world-card">
+            <div class="prog-info">
+              <div class="prog-name">🌍 WORLD</div>
+              <div class="prog-desc">Globales Basiskoordinatensystem. Ursprung = Roboterbasis. XYZ fixiert im Raum.</div>
+            </div>
+            <span id="frame-world-check" style="color:var(--orange);font-size:18px;">●</span>
+          </div>
+          <div class="program-item" style="cursor:pointer;" onclick="setFrame('TCP')" id="frame-tcp-card">
+            <div class="prog-info">
+              <div class="prog-name">🔧 TCP</div>
+              <div class="prog-desc">Tool-Center-Point am Greifer. XYZ bewegen sich mit dem Arm. Ideal für präzise Greiferbewegungen.</div>
+            </div>
+            <span id="frame-tcp-check" style="color:var(--text-dim);font-size:18px;">○</span>
+          </div>
+        </div>
+        <div style="margin-top:20px;">
+          <div class="panel-title">Aktuelle TCP-Pose</div>
+          <div style="font-family:var(--font-mono);font-size:13px;line-height:2;color:var(--text-primary);margin-top:8px;" id="full-pose-display">
+            X: — &nbsp; Y: — &nbsp; Z: —<br>
+            A: — &nbsp; B: — &nbsp; C: —
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Panel -->
+      <div class="content-panel" id="panel-settings">
+        <div class="panel-header">Einstellungen</div>
+        <div style="max-width:400px;">
+          <div class="form-group">
+            <label class="form-label">Standard-Geschwindigkeit (°/s)</label>
+            <input class="form-input" type="number" id="inp-speed" min="1" max="180" value="30">
+          </div>
+          <button class="btn btn-orange" onclick="saveSpeed()">Übernehmen</button>
+
+          <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px;">
+            <div class="panel-title">WLAN-Hotspot</div>
+            <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);line-height:1.8;margin-top:8px;">
+              SSID: <span id="conf-ssid" style="color:var(--text-primary);">KUKA-ARM</span><br>
+              IP:   <span style="color:var(--text-primary);">192.168.4.1</span><br>
+              Port: <span style="color:var(--text-primary);">80</span>
+            </div>
+          </div>
+
+          <div style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px;">
+            <div class="panel-title">Inaktivitäts-Timeout</div>
+            <p style="color:var(--text-secondary);font-size:12px;margin-top:4px;">
+              Der Arm wird nach 10 Minuten ohne Eingabe automatisch deaktiviert.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Calibration Panel -->
+      <div class="content-panel" id="panel-calibration">
+        <div class="panel-header">Kalibrierung</div>
+        <p style="color:var(--text-secondary);font-size:12px;margin-bottom:16px;">
+          Stelle für jedes Gelenk Nullpunkt, Minimum und Maximum ein.
+          Der Arm muss freigegeben sein, um Gelenke anzufahren.
+        </p>
+        <div id="calib-rows"></div>
+        <div style="margin-top:16px;">
+          <button class="btn btn-orange" onclick="saveCalibration()">Kalibrierung speichern</button>
+          <button class="btn" onclick="goHome()" style="margin-left:8px;">→ Home-Position</button>
+        </div>
+      </div>
+
+      <!-- Log Panel -->
+      <div class="content-panel" id="panel-log">
+        <div class="panel-header">Log</div>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+          <button class="btn" onclick="clearLog()">Leeren</button>
+        </div>
+        <div id="log-output"></div>
+      </div>
+
+    </div><!-- /content-area -->
+  </div><!-- /viewport -->
+
+  <!-- Right Panel -->
+  <div id="right-panel">
+
+    <!-- Axis sliders -->
+    <div class="panel-section">
+      <div class="panel-title">Gelenk-Winkel</div>
+      <div id="axis-sliders"></div>
+    </div>
+
+    <!-- Speed -->
+    <div class="panel-section">
+      <div class="panel-title">Geschwindigkeit</div>
+      <div class="speed-row">
+        <span class="speed-label">Speed</span>
+        <input type="range" class="axis-slider" id="speed-slider" min="1" max="100" value="30"
+               oninput="onSpeedChange(this.value)">
+        <span class="speed-val" id="speed-display">30%</span>
+      </div>
+    </div>
+
+    <!-- Frame selector -->
+    <div class="panel-section">
+      <div class="panel-title">Referenzsystem</div>
+      <select class="frame-select" id="frame-select" onchange="setFrame(this.value)">
+        <option value="WORLD">WORLD</option>
+        <option value="TCP">TCP</option>
+      </select>
+    </div>
+
+    <!-- TCP Pose display -->
+    <div class="panel-section">
+      <div class="panel-title">TCP-Pose</div>
+      <div class="pose-row"><span class="pose-key">X</span><span class="pose-val" id="pose-x">—</span></div>
+      <div class="pose-row"><span class="pose-key">Y</span><span class="pose-val" id="pose-y">—</span></div>
+      <div class="pose-row"><span class="pose-key">Z</span><span class="pose-val" id="pose-z">—</span></div>
+      <div class="pose-row"><span class="pose-key">A</span><span class="pose-val" id="pose-a">—</span></div>
+      <div class="pose-row"><span class="pose-key">B</span><span class="pose-val" id="pose-b">—</span></div>
+      <div class="pose-row"><span class="pose-key">C</span><span class="pose-val" id="pose-c">—</span></div>
+    </div>
+
+  </div><!-- /right-panel -->
+</div><!-- /main-layout -->
+
+<!-- ── Control Bar (bottom) ──────────────────────────────── -->
+<div id="control-bar">
+  <div class="joystick-zone" id="joystick-left"></div>
+  <div class="joystick-zone" id="joystick-right"></div>
+
+  <button id="btn-enable" onclick="toggleEnable()">FREIGABE</button>
+  <button id="btn-disable" onclick="disableArm()">STOP</button>
+  <button id="btn-home-pos" onclick="goHome()" data-tip="Home-Position">⌂ Home</button>
+
+  <div class="control-bar-spacer"></div>
+
+  <!-- E-Stop bottom -->
+  <button id="btn-estop-bottom" style="
+    background:var(--red); border:3px solid #ff4422; color:white;
+    font-weight:900; font-size:13px; padding:10px 20px; border-radius:4px;
+    cursor:pointer; letter-spacing:2px; box-shadow:0 0 12px rgba(204,34,0,0.5);"
+    onclick="triggerEstop()">⬛ E-STOP</button>
+</div>
+
+<!-- ── Scripts ────────────────────────────────────────────── -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.1/dist/nipplejs.min.js"></script>
+<script src="/static/js/ui.js"></script>
+<script src="/static/js/robot3d.js"></script>
+<script src="/static/js/axis_panel.js"></script>
+<script src="/static/js/joystick.js"></script>
+<script src="/static/js/coordinate.js"></script>
+<script src="/static/js/programs.js"></script>
+<script src="/static/js/main.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,93 @@
+# Robot Configuration – 5-DOF Desktop Arm
+# Servos: Metal MG996R (J1), MG996R (J2), MG90S (J3, J4, J5)
+# Adjust DH parameters and limits after mechanical assembly + calibration
+
+servos:
+  frequency: 50       # Hz
+  default_speed: 25   # degrees per second (konservativ für MG90S)
+
+  # Per-Typ Pulse-Breiten
+  types:
+    mg996r:
+      pulse_min_us: 500
+      pulse_max_us: 2500
+      max_speed_dps: 60    # ca. 0.17 s/60° @ 4.8V
+    mg996r_metal:
+      pulse_min_us: 500
+      pulse_max_us: 2500
+      max_speed_dps: 60
+    mg90s:
+      pulse_min_us: 600    # etwas konservativer um mechanischen Anschlag zu schützen
+      pulse_max_us: 2400
+      max_speed_dps: 100   # schneller, leichter
+
+joints:
+  - id: 0
+    name: J1
+    label: "Basis"
+    channel: 0
+    servo_type: mg996r_metal    # Metal MG996R – trägt das Gesamtgewicht
+    min_angle: 0
+    max_angle: 180
+    home_angle: 90
+    invert: false
+
+  - id: 1
+    name: J2
+    label: "Schulter"
+    channel: 1
+    servo_type: mg996r          # MG996R – hebt den Oberarm
+    min_angle: 30
+    max_angle: 150
+    home_angle: 90
+    invert: false
+
+  - id: 2
+    name: J3
+    label: "Ellbogen"
+    channel: 2
+    servo_type: mg90s           # MG90S – hebt nur Unterarm + Greifer
+    min_angle: 0
+    max_angle: 160
+    home_angle: 90
+    invert: false
+
+  - id: 3
+    name: J4
+    label: "Handgelenk"
+    channel: 3
+    servo_type: mg90s           # MG90S – nur Greifer-Last
+    min_angle: 0
+    max_angle: 180
+    home_angle: 90
+    invert: false
+
+  - id: 4
+    name: J5
+    label: "Greifer"
+    channel: 4
+    servo_type: mg90s           # MG90S – Öffnen/Schließen
+    min_angle: 0
+    max_angle: 90
+    home_angle: 0
+    invert: false
+
+# Denavit-Hartenberg Parameter (5-DOF, ca.-Werte – nach Montage kalibrieren)
+# [a (mm), alpha (deg), d (mm), theta_offset (deg)]
+dh_parameters:
+  - [0,    90,  60,   0]    # J1 – Basis (Höhe Drehachse)
+  - [100,   0,   0,   0]    # J2 – Schulter (Oberarmlänge)
+  - [90,    0,   0,   0]    # J3 – Ellbogen (Unterarmlänge)
+  - [0,    90,   0,   0]    # J4 – Handgelenk (Pitch)
+  - [0,     0,  55,   0]    # J5 – Greifer (TCP-Offset)
+
+security:
+  inactivity_timeout_sec: 600
+  require_enable_before_move: true
+  estop_requires_acknowledge: true
+
+# Stromversorgung (WICHTIG)
+# power_supply:
+#   voltage: 5.0V  ← MG90S max 6V, MG996R optimal 6V, Kompromiss 5V OK
+#   current_min_a: 3.0
+#   note: "Externe Versorgung an PCA9685 V+/GND – NICHT vom Pi!"

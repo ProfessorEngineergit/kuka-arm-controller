@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KUKA-ARM – Login</title>
+  <link rel="stylesheet" href="/static/css/kuka.css">
+</head>
+<body>
+<div id="login-page">
+  <div class="login-box">
+    <div class="login-logo">KUKA</div>
+    <div class="login-subtitle">Roboter-Controller v1.0</div>
+
+    <div class="login-error" id="login-error">Falsche Zugangsdaten</div>
+
+    <div class="form-group">
+      <label class="form-label">Benutzername</label>
+      <input class="form-input" type="text" id="inp-user" autocomplete="username" placeholder="admin">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Passwort</label>
+      <input class="form-input" type="password" id="inp-pass" autocomplete="current-password" placeholder="••••••">
+    </div>
+
+    <button id="btn-login">Anmelden</button>
+  </div>
+</div>
+
+<script>
+  const userInp = document.getElementById('inp-user');
+  const passInp = document.getElementById('inp-pass');
+  const errEl   = document.getElementById('login-error');
+  const btnLogin = document.getElementById('btn-login');
+
+  async function doLogin() {
+    const username = userInp.value.trim();
+    const password = passInp.value;
+    if (!username || !password) return;
+
+    btnLogin.textContent = '...';
+    btnLogin.disabled = true;
+    errEl.classList.remove('visible');
+
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username, password}),
+      });
+      if (res.ok) {
+        window.location.href = '/app';
+      } else {
+        errEl.classList.add('visible');
+        passInp.value = '';
+        passInp.focus();
+      }
+    } catch {
+      errEl.textContent = 'Verbindungsfehler';
+      errEl.classList.add('visible');
+    } finally {
+      btnLogin.textContent = 'Anmelden';
+      btnLogin.disabled = false;
+    }
+  }
+
+  btnLogin.addEventListener('click', doLogin);
+  passInp.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  userInp.addEventListener('keydown', e => { if (e.key === 'Enter') passInp.focus(); });
+
+  window.addEventListener('load', () => {
+    fetch('/api/auth-check').then(r => r.json()).then(d => {
+      if (d.authenticated) window.location.href = '/app';
+    });
+    userInp.focus();
+  });
+</script>
+</body>
+</html>

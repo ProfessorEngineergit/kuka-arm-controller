@@ -1,0 +1,17 @@
+[Unit]
+Description=KUKA-ARM Roboter-Controller
+After=network.target hostapd.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/kuka-arm
+ExecStart=/home/pi/kuka-arm/start.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
