@@ -7,6 +7,20 @@ APP_DIR="/home/pi/kuka-arm"
 echo "=== KUKA-ARM Setup ==="
 echo "Installationsverzeichnis: $APP_DIR"
 
+# ── 0. .env erzeugen falls fehlend ──────────────────────────
+if [ ! -f "$APP_DIR/.env" ]; then
+  echo "[0/6] .env nicht gefunden – Vorlage wird erstellt..."
+  cat > "$APP_DIR/.env" <<'ENVEOF'
+WIFI_SSID=KUKA-ARM
+WIFI_PASSWORD=kuka1234
+LOGIN_USER=admin
+LOGIN_PASSWORD=kuka123
+SECRET_KEY=changeme_generate_random_32_chars_here
+PORT=80
+ENVEOF
+  echo "      Bitte .env anpassen: nano $APP_DIR/.env"
+fi
+
 # ── 1. System-Pakete ────────────────────────────────────────
 echo "[1/6] System-Pakete installieren..."
 apt-get update -q
@@ -32,7 +46,7 @@ cd "$APP_DIR"
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip -q
-pip install -r requirements.txt -q
+pip install --extra-index-url https://www.piwheels.org/simple -r requirements.txt -q
 deactivate
 
 # ── 4. Verzeichnisse & Berechtigungen ────────────────────────

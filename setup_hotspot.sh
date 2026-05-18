@@ -25,6 +25,7 @@ systemctl stop hostapd dnsmasq || true
 rfkill unblock wlan || true
 
 # Static IP for wlan0
+mkdir -p /etc/dhcpcd.conf.d
 cat > /etc/dhcpcd.conf.d/kuka-hotspot.conf <<EOF
 interface ${IFACE}
     static ip_address=${IP}/24
