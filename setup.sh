@@ -32,14 +32,15 @@ apt-get install -y python3 python3-pip python3-venv git i2c-tools \
 
 # ── 2. I²C aktivieren ────────────────────────────────────────
 echo "[2/6] I²C aktivieren..."
-if ! grep -q "dtparam=i2c_arm=on" /boot/config.txt; then
-  echo "dtparam=i2c_arm=on" >> /boot/config.txt
-fi
-# Raspberry Pi 5 uses /boot/firmware/config.txt
-if [ -f /boot/firmware/config.txt ] && ! grep -q "dtparam=i2c_arm=on" /boot/firmware/config.txt; then
-  echo "dtparam=i2c_arm=on" >> /boot/firmware/config.txt
-fi
+# Debian Trixie on RPi uses /boot/firmware/config.txt
+for cfg in /boot/firmware/config.txt /boot/config.txt; do
+  if [ -f "$cfg" ] && ! grep -q "dtparam=i2c_arm=on" "$cfg"; then
+    echo "dtparam=i2c_arm=on" >> "$cfg"
+    echo "  I²C eingetragen in $cfg"
+  fi
+done
 modprobe i2c-dev 2>/dev/null || true
+modprobe i2c-bcm2835 2>/dev/null || true
 if ! id -nG "$REAL_USER" | grep -qw i2c; then
   usermod -aG i2c "$REAL_USER"
 fi
