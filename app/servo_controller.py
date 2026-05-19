@@ -35,9 +35,12 @@ class ServoController:
         try:
             import board
             from adafruit_pca9685 import PCA9685
-            i2c = board.I2C()  # auto-detects the correct I2C bus for this board
+            i2c = board.I2C()
             self._pca = PCA9685(i2c)
             self._pca.frequency = self.freq
+            # Immediately hold home angles so servos don't twitch on reset
+            for i, j in enumerate(self.joints):
+                self.set_angle(i, j["home_angle"])
             print("[Servo] PCA9685 initialisiert")
         except Exception as e:
             print(f"[Servo] Hardware nicht verfügbar (Mock-Modus): {e}")
