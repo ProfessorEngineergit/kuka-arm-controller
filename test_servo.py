@@ -1,56 +1,76 @@
 #!/usr/bin/env python3
 """
 Hardware test script – run directly on Raspberry Pi.
-Tests each servo channel individually on the PCA9685.
+Tests each servo on the PCA9685.
+
+Channels, limits and pulse widths are read from config/robot.yaml, so this
+script can never disagree with the controller about which channel drives
+which joint, or drive a joint past its configured limits.
 
 Usage:
-  python3 test_servo.py            # test all channels
-  python3 test_servo.py --ch 0     # test only channel 0
-  python3 test_servo.py --scan     # I2C scan only
+  python3 test_servo.py                 # alle Gelenke nacheinander testen
+  python3 test_servo.py --joint J2      # nur ein Gelenk (Name oder Nummer 1-5)
+  python3 test_servo.py --ch 4          # nur einen PCA9685-Kanal
+  python3 test_servo.py --ch 4 --angle 60   # Kanal auf Winkel fahren und halten
+  python3 test_servo.py --list          # Kanalbelegung anzeigen
+  python3 test_servo.py --scan          # I²C-Scan
 """
 import argparse
-import time
 import sys
+import time
+from pathlib import Path
 
-FREQ = 50  # Hz
+import yaml
 
-# Per-Kanal Pulse-Breiten (µs)
-# Metal MG996R (CH0) + MG996R (CH1): 500–2500µs
-# MG90S (CH2, CH3, CH4):             600–2400µs (konservativ)
-PULSE_RANGES = {
-    0: (500, 2500),   # J1 Metal MG996R
-    1: (500, 2500),   # J2 MG996R
-    2: (600, 2400),   # J3 MG90S
-    3: (600, 2400),   # J4 MG90S
-    4: (600, 2400),   # J5 MG90S Greifer
-}
+CONFIG_PATH = Path(__file__).resolve().parent / "config" / "robot.yaml"
+UNASSIGNED_PULSE = (600, 2400)  # conservative range for channels without a joint
 
 
-def us_to_duty(pulse_us: float) -> int:
-    period_us = 1_000_000 / FREQ
-    return int((pulse_us / period_us) * 0xFFFF)
+def load_config() -> dict:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 
-def angle_to_duty(channel: int, angle: float) -> int:
-    p_min, p_max = PULSE_RANGES.get(channel, (500, 2500))
-    pulse = p_min + (p_max - p_min) * (angle / 180.0)
-    return us_to_duty(pulse)
+def joint_info(cfg: dict) -> list:
+    """One dict per joint: name, label, channel, limits, pulse range, invert."""
+    types = cfg["servos"]["types"]
+    out = []
+    for j in cfg["joints"]:
+        stype = types.get(j.get("servo_type", ""), {})
+        out.append({
+            "name": j["name"],
+            "label": j.get("label", ""),
+            "type": j.get("type", "revolute"),
+            "channel": int(j["channel"]),
+            "servo_type": j.get("servo_type", "?"),
+            "min": float(j["min_angle"]),
+            "max": float(j["max_angle"]),
+            "home": float(j["home_angle"]),
+            "invert": bool(j.get("invert", False)),
+            "pulse": (stype.get("pulse_min_us", 500), stype.get("pulse_max_us", 2500)),
+        })
+    return out
 
 
-def init_pca():
+def angle_to_duty(freq: float, pulse: tuple, angle: float) -> int:
+    p_min, p_max = pulse
+    pulse_us = p_min + (p_max - p_min) * (angle / 180.0)
+    period_us = 1_000_000 / freq
+    return max(0, min(0xFFFF, int((pulse_us / period_us) * 0xFFFF)))
+
+
+def init_pca(freq: float):
     try:
         import board
-        import busio
         from adafruit_pca9685 import PCA9685
-        i2c = busio.I2C(board.SCL, board.SDA)
-        pca = PCA9685(i2c)
-        pca.frequency = FREQ
-        print(f"[OK] PCA9685 gefunden @ I2C-Adresse 0x40")
+        pca = PCA9685(board.I2C())
+        pca.frequency = freq
+        print("[OK] PCA9685 gefunden @ I2C-Adresse 0x40")
         return pca
     except Exception as e:
         print(f"[FEHLER] PCA9685 nicht gefunden: {e}")
         print("  → I²C aktiviert? 'sudo i2cdetect -y 1' prüfen")
-        print("  → Verkabelung: SDA→GPIO2 (Pin3), SCL→GPIO3 (Pin5), VCC→3.3V, GND→GND")
+        print("  → Verkabelung: SDA→GPIO2 (Pin 3), SCL→GPIO3 (Pin 5), VCC→3.3V (Pin 1), GND→GND (Pin 6)")
         sys.exit(1)
 
 
@@ -64,85 +84,111 @@ def i2c_scan():
         print("i2cdetect nicht gefunden. Installieren: sudo apt-get install i2c-tools")
 
 
-def test_channel(pca, ch: int, label: str = ""):
-    print(f"\n--- Kanal {ch} {label} ---")
-    p_min, p_max = PULSE_RANGES.get(ch, (500, 2500))
-    print(f"  Pulse-Bereich: {p_min}–{p_max} µs")
-
-    print(f"  → 0° (Minimum)  ", end='', flush=True)
-    pca.channels[ch].duty_cycle = angle_to_duty(ch, 0)
-    time.sleep(1.0)
-    print("OK")
-
-    print(f"  → 90° (Mitte)   ", end='', flush=True)
-    pca.channels[ch].duty_cycle = angle_to_duty(ch, 90)
-    time.sleep(1.0)
-    print("OK")
-
-    print(f"  → 180° (Maximum)", end='', flush=True)
-    pca.channels[ch].duty_cycle = angle_to_duty(ch, 180)
-    time.sleep(1.0)
-    print("OK")
-
-    print(f"  → 90° (zurück)  ", end='', flush=True)
-    pca.channels[ch].duty_cycle = angle_to_duty(ch, 90)
-    time.sleep(0.5)
-    print("OK")
-
-    pca.channels[ch].duty_cycle = 0
-    print(f"  Kanal {ch} ✓")
+def print_mapping(joints: list):
+    print("Kanal  Gelenk  Funktion      Servo          Bereich     Home")
+    print("─────  ──────  ────────────  ─────────────  ──────────  ─────")
+    used = {j["channel"] for j in joints}
+    for j in sorted(joints, key=lambda j: j["channel"]):
+        rng = f"{j['min']:.0f}–{j['max']:.0f}°"
+        print(f"ch{j['channel']:<4} {j['name']:<7} {j['label']:<13} {j['servo_type']:<14} "
+              f"{rng:<10}  {j['home']:>4.0f}°")
+    free = [c for c in range(16) if c not in used]
+    print(f"Frei: {', '.join(f'ch{c}' for c in free)}")
 
 
-JOINT_MAP = {
-    0: "J1 Basis          → Metal MG996R  (CH0)",
-    1: "J2 Schulter       → MG996R        (CH1)",
-    2: "J3 Ellbogen       → MG90S         (CH2)",
-    3: "J4 Handgelenk     → MG90S         (CH3)",
-    4: "J5 Greifer        → MG90S         (CH4)",
-}
+def _set(pca, freq, j, angle):
+    actual = (180.0 - angle) if j["invert"] else angle
+    pca.channels[j["channel"]].duty_cycle = angle_to_duty(freq, j["pulse"], actual)
+
+
+def test_joint(pca, freq: float, j: dict, dwell: float = 1.0):
+    """Home → Min → Max → Home, strictly inside the configured limits."""
+    print(f"\n--- {j['name']} {j['label']} (ch{j['channel']}, {j['servo_type']}) ---")
+    print(f"  Bereich {j['min']:.0f}–{j['max']:.0f}°, Home {j['home']:.0f}°, "
+          f"Puls {j['pulse'][0]}–{j['pulse'][1]} µs")
+    for text, angle in (("Home", j["home"]), ("Min", j["min"]), ("Max", j["max"]), ("Home", j["home"])):
+        print(f"  → {text:<5}{angle:6.1f}° ", end='', flush=True)
+        _set(pca, freq, j, angle)
+        time.sleep(dwell)
+        print("OK")
+    print(f"  {j['name']} ✓ (Signal bleibt an, Servo hält Home)")
+
+
+def find_joint(joints: list, key: str):
+    key = key.strip().upper()
+    for idx, j in enumerate(joints):
+        if key in (j["name"].upper(), str(idx + 1)):
+            return j
+    return None
 
 
 def main():
     parser = argparse.ArgumentParser(description='KUKA-ARM Servo-Test')
-    parser.add_argument('--ch', type=int, default=None, help='Nur diesen Kanal testen (0-15)')
+    parser.add_argument('--joint', help='Nur dieses Gelenk testen (z. B. J2 oder 2)')
+    parser.add_argument('--ch', type=int, default=None, help='Nur diesen PCA9685-Kanal (0-15)')
+    parser.add_argument('--angle', type=float, default=None,
+                        help='Mit --ch/--joint: auf diesen Winkel fahren und halten (auf Grenzen begrenzt)')
+    parser.add_argument('--list', action='store_true', help='Kanalbelegung aus robot.yaml anzeigen')
     parser.add_argument('--scan', action='store_true', help='Nur I²C-Scan durchführen')
-    parser.add_argument('--angle', type=float, default=None, help='Fährt Kanal auf diesen Winkel (mit --ch)')
     args = parser.parse_args()
+
+    cfg = load_config()
+    freq = cfg["servos"]["frequency"]
+    joints = joint_info(cfg)
 
     if args.scan:
         i2c_scan()
         return
+    if args.list:
+        print_mapping(joints)
+        return
+
+    target = None
+    if args.joint:
+        target = find_joint(joints, args.joint)
+        if target is None:
+            sys.exit(f"Gelenk '{args.joint}' nicht in robot.yaml")
+    elif args.ch is not None:
+        if not 0 <= args.ch <= 15:
+            sys.exit("Kanal muss zwischen 0 und 15 liegen")
+        target = next((j for j in joints if j["channel"] == args.ch), None)
+        if target is None:
+            print(f"[WARNUNG] ch{args.ch} ist in robot.yaml keinem Gelenk zugeordnet – "
+                  f"teste mit {UNASSIGNED_PULSE[0]}–{UNASSIGNED_PULSE[1]} µs und 0–180°")
+            target = {"name": f"ch{args.ch}", "label": "(frei)", "channel": args.ch,
+                      "servo_type": "?", "min": 0.0, "max": 180.0, "home": 90.0,
+                      "invert": False, "pulse": UNASSIGNED_PULSE}
 
     print("=== KUKA-ARM Servo-Test ===")
+    print(f"Konfiguration: {CONFIG_PATH}")
     print("Externe 5-6V Versorgung muss an V+/GND des PCA9685 angeschlossen sein!\n")
+    pca = init_pca(freq)
 
-    pca = init_pca()
-
-    if args.ch is not None:
-        if args.angle is not None:
-            print(f"Kanal {args.ch} → {args.angle}°")
-            pca.channels[args.ch].duty_cycle = angle_to_duty(args.ch, args.angle)
+    try:
+        if target is not None and args.angle is not None:
+            angle = max(target["min"], min(target["max"], args.angle))
+            if angle != args.angle:
+                print(f"[HINWEIS] {args.angle}° auf Grenze {angle}° begrenzt")
+            print(f"{target['name']} (ch{target['channel']}) → {angle}°")
+            _set(pca, freq, target, angle)
             print("Drücke STRG+C zum Beenden.")
-            try:
-                while True: time.sleep(1)
-            except KeyboardInterrupt:
-                pca.channels[args.ch].duty_cycle = 0
+            while True:
+                time.sleep(1)
+        elif target is not None:
+            test_joint(pca, freq, target)
         else:
-            label = JOINT_MAP.get(args.ch, "")
-            test_channel(pca, args.ch, label)
-    else:
-        print("Teste alle 6 Gelenke sequenziell...")
-        print("Drücke STRG+C um abzubrechen.\n")
-        try:
-            for ch, label in JOINT_MAP.items():
-                input(f"[ENTER] Kanal {ch} ({label}) testen...")
-                test_channel(pca, ch, label)
-        except KeyboardInterrupt:
-            print("\nAbgebrochen.")
-        finally:
-            for ch in range(16):
-                pca.channels[ch].duty_cycle = 0
-            print("\nAlle Servos gestoppt. Test beendet.")
+            print(f"Teste alle {len(joints)} Gelenke nacheinander (Reihenfolge wie robot.yaml).")
+            print("Drücke STRG+C um abzubrechen.\n")
+            print_mapping(joints)
+            for j in joints:
+                input(f"\n[ENTER] {j['name']} {j['label']} auf ch{j['channel']} testen...")
+                test_joint(pca, freq, j)
+    except KeyboardInterrupt:
+        print("\nAbgebrochen.")
+    finally:
+        for ch in range(16):
+            pca.channels[ch].duty_cycle = 0
+        print("\nPWM aus. Test beendet.")
 
 
 if __name__ == '__main__':

@@ -1,29 +1,47 @@
-# Robot Configuration – 5-DOF Desktop Arm
-# Servos: Metal MG996R (J1/Basis ch5), MG996R (J2/Schulter ch4), MG90S (J3 ch2, J4 ch1, J5 ch0)
-# Channel mapping verified by physical test 2026-05-18
+# Robot Configuration – 5-DOF Desktop Arm (4 Arm-Achsen + Greifer)
+#
+# Diese Datei ist die EINZIGE Quelle für Kanäle, Grenzen und Kinematik.
+# test_servo.py, die Web-Oberfläche, die 3D-Ansicht und die generierte URDF
+# (description/kuka_arm.urdf) lesen alle hieraus. README-Tabellen spiegeln
+# diese Datei nur wider.
+#
+# Kanalbelegung am PCA9685, per Hardware-Test verifiziert am 2026-05-18:
+#   ch0 = J5 Greifer, ch1 = J4 Handgelenk, ch2 = J3 Ellbogen,
+#   ch3 = nicht belegt, ch4 = J2 Schulter, ch5 = J1 Basis
 
 servos:
-  frequency: 50
-  default_speed: 8    # deg/s – langsam, kein Gegengewicht
+  frequency: 50       # Hz
+  default_speed: 8    # °/s – langsam, Arm hat kein Gegengewicht
 
+  # Pulsbreiten je Servotyp. max_speed_dps ist eine harte Obergrenze pro
+  # Gelenk – auch wenn default_speed höher eingestellt wird.
+  # torque_nm: Stall-Moment laut Datenblatt bei 4,8 V (nur für die URDF).
   types:
     mg996r:
       pulse_min_us: 500
       pulse_max_us: 2500
       max_speed_dps: 20
+      torque_nm: 0.92      # 9,4 kgf·cm
     mg996r_metal:
       pulse_min_us: 500
       pulse_max_us: 2500
       max_speed_dps: 20
+      torque_nm: 0.92      # 9,4 kgf·cm
     mg90s:
-      pulse_min_us: 600
+      pulse_min_us: 600    # konservativ, schützt den mechanischen Anschlag
       pulse_max_us: 2400
       max_speed_dps: 30
+      torque_nm: 0.18      # 1,8 kgf·cm
 
+# type: revolute = Arm-Achse (Teil der kinematischen Kette)
+#       gripper  = Greifer (öffnen/schließen) – bewegt den TCP nicht und wird
+#                  von Vorwärts-/Rückwärtskinematik ignoriert.
+# Winkel sind Servo-Winkel in Grad (0–180). 90° = Servo-Mitte.
 joints:
   - id: 0
     name: J1
     label: "Basis"
+    type: revolute
     channel: 5
     servo_type: mg996r_metal
     min_angle: 0
@@ -34,6 +52,7 @@ joints:
   - id: 1
     name: J2
     label: "Schulter"
+    type: revolute
     channel: 4
     servo_type: mg996r
     min_angle: 30
@@ -44,6 +63,7 @@ joints:
   - id: 2
     name: J3
     label: "Ellbogen"
+    type: revolute
     channel: 2
     servo_type: mg90s
     min_angle: 0
@@ -54,6 +74,7 @@ joints:
   - id: 3
     name: J4
     label: "Handgelenk"
+    type: revolute
     channel: 1
     servo_type: mg90s
     min_angle: 0
@@ -64,6 +85,7 @@ joints:
   - id: 4
     name: J5
     label: "Greifer"
+    type: gripper
     channel: 0
     servo_type: mg90s
     min_angle: 0
@@ -71,13 +93,16 @@ joints:
     home_angle: 0
     invert: false
 
-# Denavit-Hartenberg Parameter (5-DOF)
+# Denavit-Hartenberg-Parameter: [a (mm), alpha (°), d (mm), theta_offset (°)]
+# theta = Servo-Winkel + theta_offset. Zeile i gehört zu Gelenk i.
+# Zeile 5 ist der feste TCP-Versatz (Handgelenk → Greifermitte). Weil J5 ein
+# Greifer ist, wird dort KEIN Gelenkwinkel eingesetzt (theta = theta_offset).
 dh_parameters:
-  - [0,    90,  60,   0]
-  - [100,   0,   0,   0]
-  - [90,    0,   0,   0]
-  - [0,    90,   0,   0]
-  - [0,     0,  55,   0]
+  - [0,    90,  60,   0]    # J1 Basis    – Höhe der Schulterachse
+  - [100,   0,   0,   0]    # J2 Schulter – Oberarmlänge
+  - [90,    0,   0,   0]    # J3 Ellbogen – Unterarmlänge
+  - [0,    90,   0,   0]    # J4 Handgelenk (Pitch)
+  - [0,     0,  55,   0]    # TCP-Versatz (fest, Greifer)
 
 security:
   inactivity_timeout_sec: 600

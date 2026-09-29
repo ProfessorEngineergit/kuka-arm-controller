@@ -1,18 +1,26 @@
+"""Forward / inverse kinematics from the DH table in config/robot.yaml.
+
+Only joints with ``type: revolute`` are part of the kinematic chain. The
+gripper (J5) opens and closes but does not move the TCP, so its DH row is
+applied as a fixed transform (theta = theta_offset) and the IK never touches it.
+
+The arm has four revolute axes (base yaw + three pitch axes in one plane), so a
+TCP pose has four controllable coordinates: X, Y, Z and the tool pitch inside
+the arm plane. The tool's yaw always follows the base rotation, and there is no
+roll axis. The IK solves exactly those four coordinates.
+"""
+from typing import List, Optional, Sequence
+
 import numpy as np
-from typing import List, Optional
-import yaml
 
-_config = None
-_dh_params = None
+from app import config
 
-
-def _load_dh():
-    global _config, _dh_params
-    if _dh_params is None:
-        with open("config/robot.yaml") as f:
-            _config = yaml.safe_load(f)
-        _dh_params = _config["dh_parameters"]
-    return _dh_params
+# IK acceptance: a solution is only used if it really reaches the target.
+IK_POS_TOL_MM = 0.5
+IK_PITCH_TOL_DEG = 0.5
+_IK_MAX_ITER = 100
+_IK_PITCH_WEIGHT = 1.0   # mm of residual per degree of pitch error
+_FD_STEP_DEG = 1e-4
 
 
 def _dh_matrix(a: float, alpha_deg: float, d: float, theta_deg: float) -> np.ndarray:
@@ -28,15 +36,33 @@ def _dh_matrix(a: float, alpha_deg: float, d: float, theta_deg: float) -> np.nda
     ])
 
 
-def forward_kinematics(joint_angles: List[float]) -> np.ndarray:
-    """Returns 4x4 homogeneous transformation matrix (base → TCP)."""
-    dh = _load_dh()
+def _thetas(joint_angles: Sequence[float], cfg: dict) -> List[float]:
+    """DH theta (deg) per row: servo angle + offset for arm joints, offset only
+    for the gripper row and any row beyond the configured joints."""
+    joints = cfg["joints"]
+    out = []
+    for i, (_a, _alpha, _d, offset) in enumerate(cfg["dh_parameters"]):
+        moving = (i < len(joints) and i < len(joint_angles)
+                  and config.joint_type(joints[i]) == "revolute")
+        out.append((joint_angles[i] if moving else 0.0) + offset)
+    return out
+
+
+def frame_transforms(joint_angles: Sequence[float], cfg: Optional[dict] = None) -> List[np.ndarray]:
+    """Cumulative base→frame_i transforms, one per DH row (the last is the TCP)."""
+    cfg = cfg or config.get()
     T = np.eye(4)
-    for i, (params, angle) in enumerate(zip(dh, joint_angles)):
-        a, alpha, d, theta_offset = params
-        theta = angle + theta_offset
+    frames = []
+    for (a, alpha, d, _offset), theta in zip(cfg["dh_parameters"], _thetas(joint_angles, cfg)):
         T = T @ _dh_matrix(a, alpha, d, theta)
-    return T
+        frames.append(T)
+    return frames
+
+
+def forward_kinematics(joint_angles: Sequence[float], cfg: Optional[dict] = None) -> np.ndarray:
+    """Returns 4x4 homogeneous transformation matrix (base → TCP)."""
+    frames = frame_transforms(joint_angles, cfg)
+    return frames[-1] if frames else np.eye(4)
 
 
 def matrix_to_pose(T: np.ndarray) -> dict:
@@ -51,59 +77,91 @@ def matrix_to_pose(T: np.ndarray) -> dict:
         rx = np.degrees(np.arctan2(-T[1, 2], T[1, 1]))
         ry = np.degrees(np.arctan2(-T[2, 0], sy))
         rz = 0.0
-    return {"x": round(x, 2), "y": round(y, 2), "z": round(z, 2),
-            "a": round(rz, 2), "b": round(ry, 2), "c": round(rx, 2)}
+    return {"x": round(float(x), 2), "y": round(float(y), 2), "z": round(float(z), 2),
+            "a": round(float(rz), 2), "b": round(float(ry), 2), "c": round(float(rx), 2)}
 
 
-def _pose_error(target_T: np.ndarray, current_T: np.ndarray) -> float:
-    pos_err = np.linalg.norm(target_T[:3, 3] - current_T[:3, 3])
-    rot_err = np.linalg.norm(target_T[:3, :3] - current_T[:3, :3], "fro")
-    return pos_err + 10 * rot_err
+def tool_pitch(joint_angles: Sequence[float], cfg: Optional[dict] = None) -> float:
+    """Signed angle (deg) of the tool approach axis inside the arm plane,
+    measured from the horizontal. Independent of the base rotation."""
+    frames = frame_transforms(joint_angles, cfg)
+    return _pitch_from_frames(frames)
 
 
-def inverse_kinematics(target_pose: dict, initial_joints: Optional[List[float]] = None) -> Optional[List[float]]:
-    """Numerical IK using scipy minimize. Returns joint angles in degrees or None."""
-    try:
-        from scipy.optimize import minimize
-    except ImportError:
-        return None
+def _pitch_from_frames(frames: List[np.ndarray]) -> float:
+    approach = frames[-1][:3, 2]
+    up = np.array([0.0, 0.0, 1.0])
+    normal = frames[0][:3, 2]            # J2 axis = normal of the arm plane
+    radial = np.cross(up, normal)
+    if np.linalg.norm(radial) < 1e-9:    # degenerate DH (vertical J2 axis)
+        return float(np.degrees(np.arcsin(np.clip(approach[2], -1.0, 1.0))))
+    radial /= np.linalg.norm(radial)
+    return float(np.degrees(np.arctan2(approach @ up, approach @ radial)))
 
-    with open("config/robot.yaml") as f:
-        cfg = yaml.safe_load(f)
+
+def _wrap_deg(a: float) -> float:
+    return (a + 180.0) % 360.0 - 180.0
+
+
+def inverse_kinematics(
+    target_xyz: Sequence[float],
+    target_pitch: float,
+    initial_joints: Sequence[float],
+    cfg: Optional[dict] = None,
+) -> Optional[List[float]]:
+    """Solve the arm joints for a TCP position + in-plane tool pitch.
+
+    Damped least squares seeded from ``initial_joints`` (so cartesian jogging
+    stays on the current elbow branch), projected onto the joint limits.
+    Non-arm joints (gripper) are returned unchanged. Returns None if the target
+    is not reached within IK_POS_TOL_MM / IK_PITCH_TOL_DEG.
+    """
+    cfg = cfg or config.get()
     joints_cfg = cfg["joints"]
-    n = len(joints_cfg)
+    arm = config.arm_joint_ids(cfg)
+    lo = np.array([joints_cfg[i]["min_angle"] for i in arm], dtype=float)
+    hi = np.array([joints_cfg[i]["max_angle"] for i in arm], dtype=float)
+    target_xyz = np.asarray(target_xyz, dtype=float)
 
-    target_T = _build_target_matrix(target_pose)
-    x0 = initial_joints if initial_joints else [j["home_angle"] for j in joints_cfg]
-    bounds = [(j["min_angle"], j["max_angle"]) for j in joints_cfg]
+    full = [float(a) for a in initial_joints]
 
-    def objective(angles):
-        T = forward_kinematics(list(angles))
-        return _pose_error(target_T, T)
+    def residual(q: np.ndarray) -> np.ndarray:
+        angles = list(full)
+        for k, i in enumerate(arm):
+            angles[i] = q[k]
+        frames = frame_transforms(angles, cfg)
+        pos_err = frames[-1][:3, 3] - target_xyz
+        pitch_err = _wrap_deg(_pitch_from_frames(frames) - target_pitch)
+        return np.concatenate([pos_err, [_IK_PITCH_WEIGHT * pitch_err]])
 
-    result = minimize(objective, x0, method="L-BFGS-B", bounds=bounds,
-                      options={"maxiter": 500, "ftol": 1e-6})
-    if result.fun < 5.0:
-        return [round(float(a), 2) for a in result.x]
-    return None
+    q = np.clip(np.array([full[i] for i in arm], dtype=float), lo, hi)
+    lam = 1e-2
+    r = residual(q)
+    cost = r @ r
+    for _ in range(_IK_MAX_ITER):
+        if np.linalg.norm(r[:3]) < IK_POS_TOL_MM * 0.1 and abs(r[3]) < IK_PITCH_TOL_DEG * 0.1:
+            break
+        J = np.empty((len(r), len(q)))
+        for k in range(len(q)):
+            dq = np.zeros_like(q)
+            dq[k] = _FD_STEP_DEG
+            J[:, k] = (residual(q + dq) - r) / _FD_STEP_DEG
+        JTJ = J.T @ J
+        step = np.linalg.solve(JTJ + lam * np.diag(np.diag(JTJ) + 1e-9), -J.T @ r)
+        q_new = np.clip(q + step, lo, hi)
+        r_new = residual(q_new)
+        cost_new = r_new @ r_new
+        if cost_new < cost:
+            q, r, cost = q_new, r_new, cost_new
+            lam = max(lam / 3, 1e-7)
+        else:
+            lam *= 4
+            if lam > 1e8:
+                break
 
-
-def _build_target_matrix(pose: dict) -> np.ndarray:
-    x, y, z = pose.get("x", 0), pose.get("y", 0), pose.get("z", 0)
-    a = np.radians(pose.get("a", 0))
-    b = np.radians(pose.get("b", 0))
-    c = np.radians(pose.get("c", 0))
-    Rz = np.array([[np.cos(a), -np.sin(a), 0],
-                   [np.sin(a),  np.cos(a), 0],
-                   [0, 0, 1]])
-    Ry = np.array([[np.cos(b), 0, np.sin(b)],
-                   [0, 1, 0],
-                   [-np.sin(b), 0, np.cos(b)]])
-    Rx = np.array([[1, 0, 0],
-                   [0, np.cos(c), -np.sin(c)],
-                   [0, np.sin(c),  np.cos(c)]])
-    R = Rz @ Ry @ Rx
-    T = np.eye(4)
-    T[:3, :3] = R
-    T[:3, 3] = [x, y, z]
-    return T
+    if np.linalg.norm(r[:3]) > IK_POS_TOL_MM or abs(r[3]) / _IK_PITCH_WEIGHT > IK_PITCH_TOL_DEG:
+        return None
+    result = list(full)
+    for k, i in enumerate(arm):
+        result[i] = round(float(q[k]), 3)
+    return result
