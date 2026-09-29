@@ -1,4 +1,6 @@
 // Joint angle bars in left panel (read-only display, not sliders)
+// Filled from RobotConfig (ui.js) – these defaults are only used until
+// /api/config has loaded.
 const JOINT_LABELS = ['J1 Basis', 'J2 Schulter', 'J3 Ellbogen', 'J4 Handgelenk', 'J5 Greifer'];
 const JOINT_LIMITS = [[0,180],[30,150],[0,160],[0,180],[0,90]];
 
@@ -9,9 +11,9 @@ function buildJointBars() {
   JOINT_LABELS.forEach((label, i) => {
     const [mn, mx] = JOINT_LIMITS[i];
     const angle = State.joints[i] ?? 0;
-    const pct = ((angle - mn) / (mx - mn)) * 100;
+    const pct = Math.max(0, Math.min(100, ((angle - mn) / (mx - mn)) * 100));
     container.innerHTML += `
-      <div class="joint-row" title="${label}">
+      <div class="joint-row" title="${escapeHtml(label)}">
         <span class="joint-key">J${i+1}</span>
         <div class="joint-bar-bg">
           <div class="joint-bar-fill" id="jbar-${i}" style="width:${pct}%"></div>

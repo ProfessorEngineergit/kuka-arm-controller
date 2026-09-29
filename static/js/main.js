@@ -52,18 +52,19 @@ document.addEventListener('keydown', e => {
 
 // ── Init ──────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
-  // Load robot config for joint limits
-  try {
-    const cfg = await fetch('/api/config').then(r => r.json());
-    cfg.joints.forEach((j, i) => {
-      if (JOINT_LIMITS[i]) JOINT_LIMITS[i] = [j.min_angle, j.max_angle];
-      State.joints[i] = j.home_angle;
-    });
-  } catch { /* use defaults */ }
+  // Load robot config (limits, labels, DH table for the 3D view)
+  await reloadRobotConfig();
+  RobotConfig.joints.forEach((j, i) => { State.joints[i] = j.home_angle; });
+  if (RobotConfig.mock) {
+    const kss = document.getElementById('sb-kss');
+    if (kss) kss.textContent += ' · SIMULATION (kein PCA9685)';
+  }
 
-  buildJointBars();
-  initRobot3D();
-  initJoysticks();
+  // A failing optional view must never stop the control connection below.
+  for (const [name, init] of [['Gelenkanzeige', buildJointBars], ['3D-Ansicht', initRobot3D],
+                              ['Joysticks', initJoysticks]]) {
+    try { init(); } catch (e) { console.error(e); logEntry(`${name} nicht verfügbar: ${e.message}`, 'warn'); }
+  }
   setStep(10);
   setNav('jog');
 

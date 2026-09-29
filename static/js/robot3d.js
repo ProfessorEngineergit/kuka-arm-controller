@@ -1,16 +1,16 @@
-// Three.js 3D Robot Arm Visualization
+// Three.js 3D view – built from the same DH table as the controller's forward
+// kinematics (GET /api/config), so the picture always matches the numbers.
 let _scene, _camera, _renderer, _controls;
-let _joints3D = [];      // joint pivot objects
-let _segments  = [];     // link mesh objects
-let _tcpAxes   = null;
+let _robotRoot = null;     // robot Z-up → three.js Y-up
+let _jointMeshes = [];     // one sphere per arm joint
+let _linkMeshes  = [];     // one cylinder per DH row
+let _gripper     = null;   // group at the TCP
+let _tcpAxes     = null;
 
-// 5 joints: Metal MG996R, MG996R, MG90S, MG90S, MG90S
 const JOINT_COLORS = [0xff6b00, 0xff8c33, 0x88ccff, 0xaaddff, 0x00aa44];
-const JOINT_RADIUS_PER = [10, 9, 6, 5, 5];  // MG996R bigger, MG90S smaller
+const JOINT_RADIUS = [10, 9, 6, 5, 5];
 const LINK_COLOR   = 0x3a3a3a;
-
-// Approximate link lengths (mm) matching DH params in robot.yaml
-const LINK_LENGTHS = [60, 100, 90, 55, 0];
+const _UP = (typeof THREE !== 'undefined') ? new THREE.Vector3(0, 1, 0) : null;
 
 function initRobot3D() {
   const canvas = document.getElementById('three-canvas');
@@ -21,169 +21,176 @@ function initRobot3D() {
   _scene.fog = new THREE.Fog(0x111111, 600, 1200);
 
   _camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 1, 2000);
-  _camera.position.set(300, 200, 350);
-  _camera.lookAt(0, 100, 0);
+  _camera.position.set(300, 250, 350);
 
   _renderer = new THREE.WebGLRenderer({canvas, antialias: true});
   _renderer.setPixelRatio(window.devicePixelRatio);
   _renderer.setSize(canvas.clientWidth, canvas.clientHeight);
-  _renderer.shadowMap.enabled = true;
 
-  _controls = new THREE.OrbitControls(_camera, _renderer.domElement);
-  _controls.target.set(0, 100, 0);
-  _controls.enableDamping = true;
-  _controls.dampingFactor = 0.08;
+  if (THREE.OrbitControls) {
+    _controls = new THREE.OrbitControls(_camera, _renderer.domElement);
+    _controls.target.set(0, 100, 0);
+    _controls.enableDamping = true;
+    _controls.dampingFactor = 0.08;
+  }
+  _camera.lookAt(0, 100, 0);
 
-  // Lights
-  const ambient = new THREE.AmbientLight(0x404040, 2);
-  _scene.add(ambient);
+  _scene.add(new THREE.AmbientLight(0x404040, 2));
   const dirLight = new THREE.DirectionalLight(0xffffff, 2);
   dirLight.position.set(200, 400, 200);
-  dirLight.castShadow = true;
   _scene.add(dirLight);
   const fillLight = new THREE.DirectionalLight(0xff6b00, 0.3);
   fillLight.position.set(-200, 100, -200);
   _scene.add(fillLight);
 
-  // Grid
-  const grid = new THREE.GridHelper(400, 20, 0x333333, 0x222222);
-  _scene.add(grid);
+  _scene.add(new THREE.GridHelper(400, 20, 0x333333, 0x222222));
 
-  // World axes
-  _scene.add(_makeAxes(40, 0, 0, 0));
+  // Everything below lives in robot coordinates (mm, Z up).
+  _robotRoot = new THREE.Group();
+  _robotRoot.rotation.x = -Math.PI / 2;
+  _scene.add(_robotRoot);
+  _robotRoot.add(_makeAxes(40));
 
-  // Base plate
-  const baseGeo = new THREE.CylinderGeometry(30, 35, 12, 32);
-  const baseMat = new THREE.MeshPhongMaterial({color: 0x555555});
-  const base    = new THREE.Mesh(baseGeo, baseMat);
-  base.position.y = 6;
-  base.castShadow = true;
-  _scene.add(base);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(30, 35, 12, 32),
+                              new THREE.MeshPhongMaterial({color: 0x555555}));
+  base.rotation.x = Math.PI / 2;       // cylinder axis along robot Z
+  base.position.z = -6;
+  _robotRoot.add(base);
 
-  // Build arm segments
-  _buildArmSegments();
-
-  // TCP axes indicator
-  _tcpAxes = _makeAxes(30, 0, 0, 0);
-  _scene.add(_tcpAxes);
+  _buildArm();
 
   window.addEventListener('resize', _onResize);
   _animate();
   updateRobot3D();
 }
 
-function _makeAxes(size, x, y, z) {
+function _makeAxes(size) {
   const g = new THREE.Group();
   const mat = [0xff2222, 0x22ff22, 0x2222ff];
   const dirs = [[1,0,0],[0,1,0],[0,0,1]];
-  dirs.forEach(([dx,dy,dz], i) => {
-    const geo = new THREE.CylinderGeometry(1.5, 1.5, size, 8);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshPhongMaterial({color: mat[i]}));
-    mesh.position.set(dx*size/2, dy*size/2, dz*size/2);
-    if (i === 0) mesh.rotation.z = -Math.PI/2;
-    if (i === 2) mesh.rotation.x =  Math.PI/2;
-    g.add(mesh);
-    // Arrow head
-    const coneGeo = new THREE.ConeGeometry(3, 8, 8);
-    const cone = new THREE.Mesh(coneGeo, new THREE.MeshPhongMaterial({color: mat[i]}));
-    cone.position.set(dx*size, dy*size, dz*size);
-    if (i === 0) cone.rotation.z = -Math.PI/2;
-    if (i === 2) cone.rotation.x =  Math.PI/2;
+  dirs.forEach((d, i) => {
+    const dir = new THREE.Vector3(...d);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, size, 8),
+                                 new THREE.MeshPhongMaterial({color: mat[i]}));
+    shaft.quaternion.setFromUnitVectors(_UP, dir);
+    shaft.position.copy(dir.clone().multiplyScalar(size / 2));
+    g.add(shaft);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(3, 8, 8),
+                                new THREE.MeshPhongMaterial({color: mat[i]}));
+    cone.quaternion.setFromUnitVectors(_UP, dir);
+    cone.position.copy(dir.clone().multiplyScalar(size));
     g.add(cone);
   });
-  g.position.set(x, y, z);
   return g;
 }
 
-function _buildArmSegments() {
-  // 5-DOF: Metal MG996R (J1), MG996R (J2), MG90S (J3), MG90S (J4), MG90S (J5/Gripper)
-  let parent = _scene;
-  let yOffset = 12;
+function _buildArm() {
+  const dh = RobotConfig.dh_parameters;
+  const linkGeo = new THREE.CylinderGeometry(1, 1, 1, 12);   // scaled per link
+  const linkMat = new THREE.MeshPhongMaterial({color: LINK_COLOR});
+  dh.forEach(() => {
+    const link = new THREE.Mesh(linkGeo, linkMat);
+    _robotRoot.add(link);
+    _linkMeshes.push(link);
+  });
+  RobotConfig.joints.forEach((j, i) => {
+    if ((j.type || 'revolute') !== 'revolute') return;
+    const r = JOINT_RADIUS[i] || 5;
+    const color = JOINT_COLORS[i % JOINT_COLORS.length];
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 16),
+      new THREE.MeshPhongMaterial({color, emissive: color, emissiveIntensity: 0.15}));
+    mesh.userData.joint = i;
+    _robotRoot.add(mesh);
+    _jointMeshes.push(mesh);
+  });
 
-  for (let i = 0; i < 5; i++) {
-    const pivot = new THREE.Group();
-    pivot.position.y = yOffset;
-    parent.add(pivot);
-    _joints3D.push(pivot);
+  _gripper = new THREE.Group();
+  const gMat = new THREE.MeshPhongMaterial({color: 0x888888});
+  const palm = new THREE.Mesh(new THREE.BoxGeometry(26, 6, 4), gMat);
+  palm.position.z = -2;
+  _gripper.add(palm);
+  [-1, 1].forEach(side => {
+    const finger = new THREE.Mesh(new THREE.BoxGeometry(4, 6, 20), gMat);
+    finger.userData.side = side;
+    finger.position.z = 10;
+    _gripper.add(finger);
+  });
+  _robotRoot.add(_gripper);
 
-    const r = JOINT_RADIUS_PER[i];
-    const jGeo = new THREE.SphereGeometry(r, 16, 16);
-    const jMat = new THREE.MeshPhongMaterial({color: JOINT_COLORS[i], emissive: JOINT_COLORS[i], emissiveIntensity: 0.15});
-    const jMesh = new THREE.Mesh(jGeo, jMat);
-    jMesh.castShadow = true;
-    pivot.add(jMesh);
-
-    const len = LINK_LENGTHS[i];
-    if (i < 4 && len > 0) {
-      const lGeo = new THREE.CylinderGeometry(r * 0.5, r * 0.5, len, 12);
-      const lMat = new THREE.MeshPhongMaterial({color: LINK_COLOR});
-      const link  = new THREE.Mesh(lGeo, lMat);
-      link.position.y = len / 2;
-      link.castShadow = true;
-      pivot.add(link);
-      _segments.push(link);
-      yOffset = len;
-    } else if (i === 4) {
-      // Gripper (MG90S)
-      _addGripper(pivot);
-      yOffset = 40;
-    }
-
-    parent = pivot;
-  }
+  _tcpAxes = _makeAxes(30);
+  _robotRoot.add(_tcpAxes);
 }
 
-function _addGripper(parent) {
-  const mat = new THREE.MeshPhongMaterial({color: 0x888888});
-  // Two fingers
-  [-10, 10].forEach(x => {
-    const geo  = new THREE.BoxGeometry(4, 20, 4);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, 10, 0);
-    parent.add(mesh);
+// DH transform, same convention as app/kinematics.py:
+// T = Rz(theta) · Tz(d) · Tx(a) · Rx(alpha)
+function _dhMatrix(a, alphaDeg, d, thetaDeg) {
+  const deg = Math.PI / 180;
+  return new THREE.Matrix4()
+    .makeRotationZ(thetaDeg * deg)
+    .multiply(new THREE.Matrix4().makeTranslation(0, 0, d))
+    .multiply(new THREE.Matrix4().makeTranslation(a, 0, 0))
+    .multiply(new THREE.Matrix4().makeRotationX(alphaDeg * deg));
+}
+
+// Cumulative base→frame transforms: frames[0] = base, frames[k] = after DH row k.
+function _dhFrames(angles) {
+  const frames = [new THREE.Matrix4()];
+  RobotConfig.dh_parameters.forEach(([a, alpha, d, offset], i) => {
+    const j = RobotConfig.joints[i];
+    const moving = j && (j.type || 'revolute') === 'revolute';
+    const theta = (moving ? (angles[i] ?? 0) : 0) + offset;
+    frames.push(frames[i].clone().multiply(_dhMatrix(a, alpha, d, theta)));
   });
-  const palmGeo = new THREE.BoxGeometry(26, 4, 6);
-  const palm    = new THREE.Mesh(palmGeo, mat);
-  palm.position.y = 2;
-  parent.add(palm);
+  return frames;
+}
+
+function _placeLink(mesh, from, to, radius) {
+  const dir = to.clone().sub(from);
+  const len = dir.length();
+  mesh.visible = len > 0.5;
+  if (!mesh.visible) return;
+  mesh.position.copy(from).add(to).multiplyScalar(0.5);
+  mesh.quaternion.setFromUnitVectors(_UP, dir.normalize());
+  mesh.scale.set(radius, len, radius);
 }
 
 function updateRobot3D() {
-  if (_joints3D.length < 5) return;
-  const a = State.joints;
+  if (!_robotRoot) return;
+  const frames = _dhFrames(State.joints);
+  const origins = frames.map(f => new THREE.Vector3().setFromMatrixPosition(f));
 
-  // J1 Metal MG996R – Basis-Rotation um Y
-  _joints3D[0].rotation.y = THREE.MathUtils.degToRad(a[0] - 90);
+  _linkMeshes.forEach((mesh, k) => {
+    const r = (JOINT_RADIUS[k] || 5) * 0.5;
+    _placeLink(mesh, origins[k], origins[k + 1], r);
+  });
 
-  // J2 MG996R – Schulter-Pitch um Z
-  _joints3D[1].rotation.z = THREE.MathUtils.degToRad(-(a[1] - 90));
+  // Joint i rotates about the Z axis of frame i (before its own DH row).
+  _jointMeshes.forEach(mesh => mesh.position.copy(origins[mesh.userData.joint]));
 
-  // J3 MG90S – Ellbogen-Pitch um Z
-  _joints3D[2].rotation.z = THREE.MathUtils.degToRad(-(a[2] - 90));
+  // Gripper + TCP axes at the last frame; fingers open with the gripper joint.
+  const tcp = frames[frames.length - 1];
+  const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scale = new THREE.Vector3();
+  tcp.decompose(pos, quat, scale);
+  _gripper.position.copy(pos);
+  _gripper.quaternion.copy(quat);
+  _tcpAxes.position.copy(pos);
+  _tcpAxes.quaternion.copy(quat);
 
-  // J4 MG90S – Handgelenk-Pitch um Z
-  _joints3D[3].rotation.z = THREE.MathUtils.degToRad(a[3] - 90);
-
-  // J5 MG90S – Greifer (open/close)
-  const openFactor = 1 + (a[4] / 90) * 0.9;
-  const g = _joints3D[4];
-  if (g.children[1]) g.children[1].position.x = -8 * openFactor;
-  if (g.children[2]) g.children[2].position.x =  8 * openFactor;
-
-  // TCP axes folgen dem letzten Gelenk
-  if (_tcpAxes && _joints3D[4]) {
-    const wp = new THREE.Vector3();
-    _joints3D[4].getWorldPosition(wp);
-    _tcpAxes.position.copy(wp);
-    const wq = new THREE.Quaternion();
-    _joints3D[4].getWorldQuaternion(wq);
-    _tcpAxes.quaternion.copy(wq);
+  const gi = RobotConfig.joints.findIndex(j => j.type === 'gripper');
+  let open = 0.5;
+  if (gi >= 0) {
+    const j = RobotConfig.joints[gi];
+    open = Math.max(0, Math.min(1, ((State.joints[gi] ?? j.min_angle) - j.min_angle) /
+                                  Math.max(1, j.max_angle - j.min_angle)));
   }
+  _gripper.children.forEach(c => {
+    if (c.userData.side) c.position.x = c.userData.side * (4 + 8 * open);
+  });
 }
 
 function _animate() {
   requestAnimationFrame(_animate);
-  _controls.update();
+  if (_controls) _controls.update();
   _renderer.render(_scene, _camera);
 }
 

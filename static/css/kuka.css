@@ -762,6 +762,9 @@ body {
 }
 .cart-btn:hover { border-color: var(--orange); color: var(--orange); background: var(--bg4); }
 .cart-btn:active { background: var(--orange2); border-color: var(--orange); color: #fff; }
+.cart-btn.locked,
+.cart-btn.locked:hover,
+.cart-btn.locked:active { opacity: 0.35; cursor: not-allowed; border-color: var(--border2); color: var(--t2); background: var(--bg3); }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
