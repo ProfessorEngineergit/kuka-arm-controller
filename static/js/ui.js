@@ -1,3 +1,42 @@
+// ── Robot configuration (GET /api/config) ─────────────────────
+// Defaults mirror config/robot.yaml; main.js replaces them with the live
+// values on startup and after every calibration.
+const RobotConfig = {
+  joints: [
+    {name: 'J1', label: 'Basis',      type: 'revolute', servo_type: 'mg996r_metal', min_angle: 0,  max_angle: 180, home_angle: 90},
+    {name: 'J2', label: 'Schulter',   type: 'revolute', servo_type: 'mg996r',       min_angle: 30, max_angle: 150, home_angle: 90},
+    {name: 'J3', label: 'Ellbogen',   type: 'revolute', servo_type: 'mg90s',        min_angle: 0,  max_angle: 160, home_angle: 90},
+    {name: 'J4', label: 'Handgelenk', type: 'revolute', servo_type: 'mg90s',        min_angle: 0,  max_angle: 180, home_angle: 90},
+    {name: 'J5', label: 'Greifer',    type: 'gripper',  servo_type: 'mg90s',        min_angle: 0,  max_angle: 90,  home_angle: 0},
+  ],
+  dh_parameters: [[0, 90, 60, 0], [100, 0, 0, 0], [90, 0, 0, 0], [0, 90, 0, 0], [0, 0, 55, 0]],
+  servos: {default_speed: 8, types: {}},
+  mock: false,
+};
+
+function applyRobotConfig(cfg) {
+  if (!cfg || !Array.isArray(cfg.joints)) return;
+  RobotConfig.joints = cfg.joints;
+  if (Array.isArray(cfg.dh_parameters)) RobotConfig.dh_parameters = cfg.dh_parameters;
+  if (cfg.servos) RobotConfig.servos = cfg.servos;
+  RobotConfig.mock = !!cfg.mock;
+  cfg.joints.forEach((j, i) => {
+    JOINT_LIMITS[i] = [j.min_angle, j.max_angle];
+    JOINT_LABELS[i] = `${j.name} ${j.label}`;
+  });
+}
+
+async function reloadRobotConfig() {
+  try {
+    applyRobotConfig(await fetch('/api/config').then(r => r.json()));
+  } catch { /* keep defaults */ }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => (
+    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
 // ── Global State ────────────────────────────────────────────
 const State = {
   joints:    [90, 90, 90, 90, 0],
@@ -26,7 +65,7 @@ function setNav(name) {
   if (tabs[idx]) tabs[idx].classList.add('active');
 
   if (name === 'jog')  showPanel(null);
-  if (name === 'prog') { showPanel('programs'); loadPrograms(); }
+  if (name === 'prog') showPanel('programs');
 }
 
 function showPanel(name) {
@@ -40,6 +79,12 @@ function showPanel(name) {
     const mi = document.getElementById('mi-' + name.replace('-','_').replace('-','_'));
     const mi2 = document.querySelector(`[onclick="showPanel('${name}')"]`);
     if (mi2) mi2.classList.add('active');
+  }
+  if (name === 'programs')    loadPrograms();
+  if (name === 'calibration') buildCalibRows();
+  if (name === 'settings') {
+    const inp = document.getElementById('inp-speed');
+    if (inp) inp.value = RobotConfig.servos.default_speed;
   }
 
   // Update vp mode badge
@@ -160,13 +205,23 @@ function onOverrideChange(val) {
   if (el) el.textContent = val;
 }
 
+// Saves the base speed (°/s) from the settings panel. The override slider is
+// a per-move percentage of this value and is not persisted.
 async function saveSpeed() {
-  await fetch('/api/config/speed', {
+  const speed = parseFloat(document.getElementById('inp-speed')?.value);
+  const resp = await fetch('/api/config/speed', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({speed: State.override * 1.8}),
+    body: JSON.stringify({speed}),
   });
-  logEntry('Geschwindigkeit gespeichert', 'ok');
+  if (!resp.ok) {
+    let detail = `HTTP ${resp.status}`;
+    try { detail = (await resp.json()).detail || detail; } catch { /* ignore */ }
+    logEntry('Geschwindigkeit nicht gespeichert: ' + detail, 'err');
+    return;
+  }
+  await reloadRobotConfig();
+  logEntry(`Geschwindigkeit gespeichert: ${speed} °/s`, 'ok');
 }
 
 // ── Frame ────────────────────────────────────────────────────
@@ -216,28 +271,23 @@ function updateConnectionUI(connected) {
 }
 
 // ── Calibration ──────────────────────────────────────────────
-const JOINT_SERVO_LABELS = [
-  'Metal MG996R', 'MG996R', 'MG90S', 'MG90S', 'MG90S'
-];
-const _calibData = {};
-
+// Rows are always seeded from the live robot.yaml values, so pressing
+// "Speichern" without edits writes back exactly what is configured.
 function buildCalibRows() {
   const container = document.getElementById('calib-rows');
   if (!container) return;
-  const jnames = ['Basis', 'Schulter', 'Ellbogen', 'Handgelenk', 'Greifer'];
   container.innerHTML = '';
-  State.joints.forEach((angle, i) => {
-    _calibData[i] = _calibData[i] || {min_angle: 0, home_angle: angle, max_angle: 180};
+  RobotConfig.joints.forEach((j, i) => {
     container.innerHTML += `
       <div class="calib-row">
-        <span class="calib-jlabel">J${i+1}</span>
-        <span style="font-size:10px;color:var(--t3);width:80px;">${jnames[i]}<br><em style="font-size:9px">${JOINT_SERVO_LABELS[i]}</em></span>
+        <span class="calib-jlabel">${escapeHtml(j.name)}</span>
+        <span style="font-size:10px;color:var(--t3);width:80px;">${escapeHtml(j.label)}<br><em style="font-size:9px">${escapeHtml(j.servo_type)} · ch${escapeHtml(j.channel)}</em></span>
         <div class="calib-inputs">
-          <div class="calib-field"><label>Min</label><input type="number" id="c-min-${i}" value="0" min="0" max="180"></div>
-          <div class="calib-field"><label>Home</label><input type="number" id="c-home-${i}" value="${angle.toFixed(0)}" min="0" max="180"></div>
-          <div class="calib-field"><label>Max</label><input type="number" id="c-max-${i}" value="180" min="0" max="180"></div>
+          <div class="calib-field"><label>Min</label><input type="number" id="c-min-${i}" value="${j.min_angle}" min="0" max="180"></div>
+          <div class="calib-field"><label>Home</label><input type="number" id="c-home-${i}" value="${j.home_angle}" min="0" max="180"></div>
+          <div class="calib-field"><label>Max</label><input type="number" id="c-max-${i}" value="${j.max_angle}" min="0" max="180"></div>
         </div>
-        <button class="btn" style="font-size:10px;padding:3px 6px;" onclick="captureJoint(${i})">←</button>
+        <button class="btn" style="font-size:10px;padding:3px 6px;" title="Aktuelle Stellung als Home übernehmen" onclick="captureJoint(${i})">←</button>
       </div>`;
   });
 }
@@ -248,18 +298,43 @@ function captureJoint(i) {
 }
 
 async function saveCalibration() {
-  for (let i = 0; i < 5; i++) {
-    for (const [field, key] of [['min_angle','min'],['home_angle','home'],['max_angle','max']]) {
-      const el = document.getElementById(`c-${key}-${i}`);
-      if (!el) continue;
-      await fetch('/api/calibrate', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({joint: i, field, value: parseFloat(el.value)}),
-      });
+  const changed = [];
+  RobotConfig.joints.forEach((j, i) => {
+    const val = key => parseFloat(document.getElementById(`c-${key}-${i}`)?.value);
+    const next = {min_angle: val('min'), home_angle: val('home'), max_angle: val('max')};
+    if (Object.values(next).some(v => !Number.isFinite(v))) return;
+    if (next.min_angle === j.min_angle && next.max_angle === j.max_angle &&
+        next.home_angle === j.home_angle) return;
+    changed.push([i, next]);
+  });
+  if (!changed.length) { logEntry('Keine Änderungen', 'info'); return; }
+
+  try {
+    for (const [i, next] of changed) {
+      if (next.min_angle >= next.max_angle) throw new Error(`${RobotConfig.joints[i].name}: Min muss kleiner als Max sein`);
+      // Widen first, so an intermediate state can never be min > max.
+      const order = next.max_angle >= RobotConfig.joints[i].max_angle
+        ? ['max_angle', 'min_angle', 'home_angle'] : ['min_angle', 'max_angle', 'home_angle'];
+      for (const field of order) {
+        const resp = await fetch('/api/calibrate', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({joint: i, field, value: next[field]}),
+        });
+        if (!resp.ok) {
+          let detail = `HTTP ${resp.status}`;
+          try { detail = (await resp.json()).detail || detail; } catch { /* ignore */ }
+          throw new Error(`${RobotConfig.joints[i].name}: ${detail}`);
+        }
+      }
     }
+    logEntry(`Kalibrierung gespeichert ✓ (${changed.length} Gelenk(e))`, 'ok');
+  } catch (e) {
+    logEntry('Kalibrierung fehlgeschlagen: ' + e.message, 'err');
   }
-  logEntry('Kalibrierung gespeichert ✓', 'ok');
+  await reloadRobotConfig();
+  buildCalibRows();
+  if (typeof buildJointBars === 'function') buildJointBars();
 }
 
 // ── Programs UI ──────────────────────────────────────────────

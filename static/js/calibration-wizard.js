@@ -1,7 +1,7 @@
 // ── Interactive Calibration Wizard ────────────────────────
 let _wizardState = {
   currentJoint: null,
-  jointNames: ['J1 Basis', 'J2 Schulter', 'J3 Ellbogen', 'J4 Handgelenk', 'J5 Handgelenk Roll'],
+  jointNames: [],          // filled from RobotConfig in wizardInitialize()
   calibData: {},
   zeroPoints: {},
   minLimits: {},
@@ -27,14 +27,15 @@ function wizardInitialize() {
   _wizardState.minLimits = {};
   _wizardState.maxLimits = {};
   _wizardState.calibrated = new Set();
+  _wizardState.jointNames = RobotConfig.joints.map(j => `${j.name} ${j.label}`);
 
   // Seed from the CURRENT live config/state so untouched joints keep their
   // existing calibration (we only persist joints the user actually edits).
-  for (let i = 0; i < 5; i++) {
-    _wizardState.minLimits[i] = JOINT_LIMITS[i][0];
-    _wizardState.maxLimits[i] = JOINT_LIMITS[i][1];
-    _wizardState.zeroPoints[i] = (State.joints[i] ?? 90);
-  }
+  RobotConfig.joints.forEach((j, i) => {
+    _wizardState.minLimits[i] = j.min_angle;
+    _wizardState.maxLimits[i] = j.max_angle;
+    _wizardState.zeroPoints[i] = j.home_angle;
+  });
 
   // Show initial screen
   document.getElementById('wizard-initial').style.display = 'flex';
@@ -57,7 +58,7 @@ function wizardShowSelectScreen() {
   // Generate joint selection buttons
   const container = document.getElementById('wizard-joint-buttons');
   container.innerHTML = '';
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < _wizardState.jointNames.length; i++) {
     const btn = document.createElement('button');
     btn.className = 'btn btn-orange';
     btn.style.padding = '10px';
@@ -169,7 +170,7 @@ function wizardNextJoint() {
     alert(`${_wizardState.jointNames[j]}\n\n${err}\n\nBitte korrigieren, bevor Sie fortfahren.`);
     return;
   }
-  if (j < 4) {
+  if (j < _wizardState.jointNames.length - 1) {
     _wizardState.currentJoint = j + 1;
     wizardShowSetupStep();
   } else {
@@ -185,12 +186,12 @@ function wizardShowSummaryStep() {
   // Generate summary
   const summaryList = document.getElementById('wizard-summary-list');
   summaryList.innerHTML = '';
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < _wizardState.jointNames.length; i++) {
     const entry = document.createElement('div');
     entry.style.padding = '6px 0';
     entry.style.borderBottom = '1px solid var(--border)';
     entry.innerHTML = `
-      <div style="color:var(--orange);font-weight:700;">${_wizardState.jointNames[i]}</div>
+      <div style="color:var(--orange);font-weight:700;">${escapeHtml(_wizardState.jointNames[i])}</div>
       <div>Zero: ${_wizardState.zeroPoints[i].toFixed(1)}°</div>
       <div>Min: ${_wizardState.minLimits[i].toFixed(0)}° | Max: ${_wizardState.maxLimits[i].toFixed(0)}°</div>
     `;
@@ -246,8 +247,9 @@ async function wizardSaveAll() {
       await _wizardPostField(j, 'max_angle', _wizardState.maxLimits[j]);
       await _wizardPostField(j, 'min_angle', _wizardState.minLimits[j]);
       await _wizardPostField(j, 'home_angle', _wizardState.zeroPoints[j]);
-      JOINT_LIMITS[j] = [_wizardState.minLimits[j], _wizardState.maxLimits[j]];
     }
+    await reloadRobotConfig();
+    if (typeof buildJointBars === 'function') buildJointBars();
     logEntry(`Kalibrierung gespeichert ✓ (${targets.length} Gelenk(e))`, 'ok');
     showPanel('calibration');
     if (typeof buildCalibRows === 'function') buildCalibRows();

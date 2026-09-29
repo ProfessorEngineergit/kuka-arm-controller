@@ -1,6 +1,6 @@
 // Dual nipplejs joystick in the bottom bar
-// Left:  J1 (yaw) + J2 (shoulder)  or  X/Y cartesian
-// Right: J3 (elbow) + J4 (wrist)   or  Z + rotation
+// Cartesian jogging in the active frame (WORLD / TCP):
+// Left:  X / Y      Right: Z (vertical) / tool pitch B (horizontal)
 
 let _leftJoy = null, _rightJoy = null;
 let _lv = {x:0, y:0}, _rv = {x:0, y:0};
@@ -35,7 +35,7 @@ function _tick() {
     dx:  lx * mm,
     dy:  ly * mm,
     dz:  ry * mm,
-    da: -rx * (spd / 100) * 3,
+    db: -rx * (spd / 100) * 3,
     frame: State.frame,
     speed: spd,
   });

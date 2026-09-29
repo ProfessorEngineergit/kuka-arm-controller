@@ -4,7 +4,9 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$APP_DIR"
 
 source venv/bin/activate
-export $(grep -v '^#' .env | xargs)
+if [ -f .env ]; then
+  export $(grep -v '^#' .env | xargs)
+fi
 
 PORT="${PORT:-80}"
 

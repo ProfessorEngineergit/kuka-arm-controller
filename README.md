@@ -1,17 +1,30 @@
 # KUKA-ARM – 5-DOF Roboterarm mit Raspberry Pi
 
-Ein vollständig funktionsfähiger Roboterarm-Controller basierend auf einem 3D-gedruckten 5-DOF-Arm. Das System nutzt einen Raspberry Pi, einen PCA9685 16-Kanal PWM-Treiber und handelsübliche Servo-Motoren für eine Web-basierte Steuerung mit 3D-Visualisierung.
+Web-Controller für einen 3D-gedruckten Desktop-Roboterarm: vier Arm-Achsen
+plus Greifer, angesteuert von einem Raspberry Pi über einen PCA9685
+16-Kanal-PWM-Treiber. Die Bedienoberfläche ist einem KUKA smartPAD
+nachempfunden (Achs- und kartesisches Verfahren, Programme, Kalibrierung,
+3D-Ansicht) und läuft im Browser – der Pi spannt dafür ein eigenes WLAN auf.
+
+> **Eine Quelle für alles:** [`config/robot.yaml`](config/robot.yaml) ist die
+> einzige Stelle, an der Kanäle, Grenzen und Kinematik stehen. Controller,
+> `test_servo.py`, Web-Oberfläche, 3D-Ansicht und die generierte URDF lesen
+> daraus; die Tabellen in dieser README werden von den Tests gegen
+> `robot.yaml` geprüft.
 
 ## 📋 Inhaltsverzeichnis
 
 1. [Hardware-Übersicht](#hardware-übersicht)
-2. [Servo-Spezifikationen](#servo-spezifikationen)
+2. [Kinematik & Robotermodell (URDF)](#kinematik--robotermodell-urdf)
 3. [Netzteil-Dimensionierung](#netzteil-dimensionierung)
-4. [Verdrahtungsanleitung](#verdrahtungsanleitung)
+4. [Verdrahtung](#verdrahtung)
 5. [Installation](#installation)
 6. [Inbetriebnahme](#inbetriebnahme)
-7. [Fehlerbehebung](#fehlerbehebung)
-8. [Sicherheit](#sicherheit)
+7. [Programme](#programme)
+8. [Entwicklung & Tests](#entwicklung--tests)
+9. [Fehlerbehebung](#fehlerbehebung)
+10. [Sicherheit](#sicherheit)
+11. [Externe Simulation (OmniSim)](#externe-simulation-omnisim)
 
 ---
 
@@ -21,521 +34,372 @@ Ein vollständig funktionsfähiger Roboterarm-Controller basierend auf einem 3D-
 
 | Komponente | Typ/Modell | Funktion | Bemerkung |
 |---|---|---|---|
-| **Raspberry Pi** | 4B oder neuer | Kontrolle + Web-Server | 2GB RAM mindestens |
-| **PCA9685** | 16-Kanal PWM Treiber | Servo-PWM-Erzeugung | I²C-gesteuert |
-| **J1 (Basis)** | Metal MG996R | Basis-Rotation | 1A @ 6V, 500-2500µs |
-| **J2 (Schulter)** | MG996R | Schulter-Hebung | 0.8A @ 6V, 500-2500µs |
-| **J3 (Ellbogen)** | MG90S | Ellbogen-Bewegung | 0.3A @ 5V, 600-2400µs |
-| **J4 (Handgelenk Pitch)** | MG90S | Handgelenk-Neigung | 0.3A @ 5V, 600-2400µs |
-| **J5 (Handgelenk Roll)** | MG90S | Handgelenk-Rotation | 0.3A @ 5V, 600-2400µs |
-| **Stromversorgung** | 5-6V, min. 3.5A | Externe Versorgung | NICHT vom Pi! |
+| **Raspberry Pi** | 4B oder neuer | Steuerung + Web-Server | Raspberry Pi OS (Debian Trixie) |
+| **PCA9685** | 16-Kanal PWM-Treiber | Servo-PWM-Erzeugung | I²C, Adresse 0x40 |
+| **J1–J2** | Metal MG996R / MG996R | Basis, Schulter | 500–2500 µs |
+| **J3–J5** | MG90S | Ellbogen, Handgelenk, Greifer | 600–2400 µs (konservativ) |
+| **Stromversorgung** | 5–6 V, ≥ 5 A | Servos | **Nicht** vom Pi! |
 
-### Anforderungen
+### Kanalbelegung und Achsgrenzen
 
-- **Stromversorgung**: Externe 5-6V Gleichspannungsquelle mit mindestens **3.5A** Leistung
-- **Netzwerk**: WiFi oder LAN (für Web-Zugriff)
-- **Python**: 3.8 oder neuer
+Per Hardware-Test verifiziert am 2026-05-18. Kanal 3 ist frei.
+
+| Gelenk | Funktion | PCA9685-Kanal | Servo | Bereich | Home |
+|---|---|---|---|---|---|
+| **J1** | Basis | 5 | Metal MG996R | 0–180° | 90° |
+| **J2** | Schulter | 4 | MG996R | 30–150° | 90° |
+| **J3** | Ellbogen | 2 | MG90S | 0–160° | 90° |
+| **J4** | Handgelenk | 1 | MG90S | 0–180° | 90° |
+| **J5** | Greifer | 0 | MG90S | 0–90° | 0° |
+
+Winkel sind Servo-Winkel (0–180°, 90° = Servo-Mitte). `python3 test_servo.py --list`
+zeigt dieselbe Tabelle direkt aus `robot.yaml`.
+
+### Pulsbreiten und Geschwindigkeit
+
+| Servo-Typ | 0° | 90° | 180° | max. Geschwindigkeit |
+|---|---|---|---|---|
+| **Metal MG996R / MG996R** | 500 µs | 1500 µs | 2500 µs | 20 °/s |
+| **MG90S** | 600 µs | 1500 µs | 2400 µs | 30 °/s |
+
+Die Grundgeschwindigkeit ist 8 °/s (der Arm hat kein Gegengewicht). Der
+Override-Regler in der Oberfläche ist ein Prozentsatz davon; zusätzlich ist
+jede Achse hart auf die Maximalgeschwindigkeit ihres Servotyps begrenzt.
 
 ---
 
-## Servo-Spezifikationen
+## Kinematik & Robotermodell (URDF)
 
-### Pulse-Breiten-Übersicht
+Der Arm hat **vier Arm-Achsen und einen Greifer**:
 
-Die Servosteuerung erfolgt über PWM-Signale bei 50 Hz. Jeder Servo-Typ hat unterschiedliche Pulse-Breiten für 0° und 180°:
+- **J1** dreht die Basis um die Hochachse.
+- **J2, J3, J4** schwenken in einer gemeinsamen Ebene (Schulter, Ellbogen, Handgelenk-Neigung).
+- **J5** öffnet und schließt den Greifer. Er bewegt den TCP nicht und ist
+  deshalb nicht Teil der kinematischen Kette (`type: gripper` in `robot.yaml`).
 
-| Servo-Typ | 0° (Min) | 90° (Mittel) | 180° (Max) | Sicherheit | Notizen |
-|---|---|---|---|---|---|
-| **Metal MG996R** | 500µs | 1500µs | 2500µs | ±10µs | Robust, höheres Drehmoment |
-| **MG996R** | 500µs | 1500µs | 2500µs | ±10µs | Standard-Servo |
-| **MG90S** | 600µs | 1500µs | 2400µs | ±20µs | Konservativ: verhindert Beschädigungen |
+Denavit-Hartenberg-Tabelle (`[a mm, alpha °, d mm, theta_offset °]`, theta = Servo-Winkel + Offset):
 
-**Wichtig**: MG90S-Servos verwenden engere Pulse-Breiten (600-2400µs statt 500-2500µs) zum Schutz vor Beschädigung bei falscher Steuerung.
-
-### Winkelbereich je Gelenk
-
-| Gelenk | Min | Mittel (Home) | Max | Grund |
+| Zeile | a | alpha | d | Bedeutung |
 |---|---|---|---|---|
-| **J1 Basis** | 0° | 90° | 180° | Vollständige Rotation |
-| **J2 Schulter** | 30° | 90° | 150° | Mechanische Limits |
-| **J3 Ellbogen** | 0° | 90° | 160° | Arbeitsraum |
-| **J4 Pitch** | 0° | 90° | 180° | Greifer-Neigung |
-| **J5 Roll** | 0° | 90° | 180° | Greifer-Rotation |
+| J1 | 0 | 90 | 60 | Höhe der Schulterachse |
+| J2 | 100 | 0 | 0 | Oberarm |
+| J3 | 90 | 0 | 0 | Unterarm |
+| J4 | 0 | 90 | 0 | Handgelenk-Neigung |
+| TCP | 0 | 0 | 55 | fester Versatz Handgelenk → Greifermitte |
+
+**Kartesisches Verfahren:** Mit vier Achsen sind genau vier TCP-Koordinaten
+frei wählbar: **X, Y, Z und die Neigung B** des Werkzeugs in der Armebene.
+Die Gier (A) folgt immer der Basisdrehung, eine Roll-Achse (C) gibt es nicht.
+A/C-Tasten sind deshalb gesperrt, und ein unerreichbares Ziel wird mit einer
+Meldung abgelehnt statt ungenau angefahren (Toleranz 0,5 mm / 0,5°).
+
+**3D-Ansicht:** wird im Browser aus derselben DH-Tabelle berechnet wie die
+Vorwärtskinematik. Wenn die 3D-Ansicht in Home-Stellung nicht wie der echte
+Arm aussieht, stimmt die DH-Tabelle (oder ein `theta_offset`) nicht.
+
+**URDF:** [`description/kuka_arm.urdf`](description/kuka_arm.urdf) wird aus
+`robot.yaml` erzeugt und prüft sich selbst gegen die Vorwärtskinematik
+(Abweichung < 1e-6 mm, CI schlägt bei veralteter URDF fehl):
+
+```bash
+python3 tools/generate_urdf.py          # nach Änderungen an robot.yaml
+python3 tools/generate_urdf.py --check  # nur prüfen
+```
+
+- Einheiten m / rad; **URDF-Nullstellung = Servo-Mitte**: `servo_deg = degrees(q) + 90`.
+  Die Nullkonfiguration liegt damit mitten im Bereich statt auf einem Anschlag.
+- Der Greifer ist kein URDF-Gelenk; sein DH-Eintrag ist der feste Frame `tool0`.
+- Keine Massen/Trägheiten, weil keine veröffentlicht sind. Ein optionaler
+  Abschnitt `dynamics` in `robot.yaml` (z. B. aus CAD) wird mit ausgegeben:
+  `dynamics: {link_j2: {mass_kg: 0.08, com_m: [0.05, 0, 0], inertia: [ixx, iyy, izz, ixy, ixz, iyz]}}`.
 
 ---
 
 ## Netzteil-Dimensionierung
 
-### Stromberechnung
+| Servo | Anzahl | Betrieb (ca.) | Blockierstrom (ca., 6 V) |
+|---|---|---|---|
+| MG996R (J1, J2) | 2 | 0,5–0,9 A | 2,5 A |
+| MG90S (J3–J5) | 3 | 0,1–0,3 A | 0,7 A |
+| **Summe** | | **≈ 2,7 A** | **≈ 7 A** |
 
-Die Gesamtleistung ist die Summe aller Servo-Stromaufnahmen **im worst-case** (alle Servos gleichzeitig unter Last):
-
-```
-J1 (Metal MG996R) @ 6V:       1.0A
-J2 (MG996R)       @ 6V:       0.8A
-J3 (MG90S)        @ 5V:       0.3A
-J4 (MG90S)        @ 5V:       0.3A
-J5 (MG90S)        @ 5V:       0.3A
-─────────────────────────────────
-Gesamt:                       2.7A @ avg
-
-Mit Reserve (15%):            3.1A
-Mit Sicherheitspuffer:        3.5A empfohlen
-```
-
-**Empfehlung**: Mindestens **3.5A @ 5-6V** externe Stromversorgung
-
-### Netzteil-Auswahl
-
-- **Zu wenig Strom** → Servos zittern, reagieren langsam oder frieren ein
-- **Zu viel Strom** → keine Probleme (modernes Netzteil regelt runter)
-- **Falsche Spannung** → Servos beschädigt
-
-**Gute Optionen**:
-- Mean Well LRS-50-5 (5V, 10A) – robust, industriell
-- Meanwell GSM90A05 (5V, 18A) – overkill, aber sicher
-- USB-C Power Delivery 5V/3A+ (einfach zu beschaffen)
-- Alte Laptop-Netzteile (bei Kompatibilität überprüfen)
-
-### Stromanschluss
-
-```
-┌─────────────────────────────────────────────┐
-│  Externe Stromversorgung (5-6V, 3.5A+)     │
-└──────┬──────────────────────────┬───────────┘
-       │                          │
-       │ (Red +)                 │ (Black -)
-       └────┬─────────────────────┴────┐
-            │                          │
-     ┌──────▼────────────────────────▼─┐
-     │  PCA9685 Schraubklemmen        │
-     │  V+: Rot vom Netzteil          │
-     │  GND: Schwarz vom Netzteil     │
-     └────┬─────────────────────────┬──┘
-          │                         │
-     (Intern an alle Servos)   (GND gemeinsam mit Pi)
-```
+**Empfehlung:** 5–6 V mit **mindestens 5 A** (z. B. Mean Well LRS-50-5, 10 A).
+Ein unterdimensioniertes Netzteil bricht beim Anfahren unter Last ein – die
+Servos zittern und der Pi kann neu starten. Ein 1000 µF-Elko an V+/GND des
+PCA9685 puffert Stromspitzen.
 
 ---
 
-## Verdrahtungsanleitung
+## Verdrahtung
 
-### 1. Raspberry Pi ↔ PCA9685 (I²C-Bus)
-
-Der PCA9685 wird über I²C (GPIO 2 und 3) mit dem Pi verbunden:
+### Raspberry Pi ↔ PCA9685 (I²C)
 
 ```
-Raspberry Pi Pin   →   PCA9685 Pin   Funktion
-─────────────────────────────────────────────
-Pin 1 (3.3V)      →   VCC           3.3V Logik
-Pin 3 (GPIO2/SDA) →   SDA           I²C Daten
-Pin 5 (GPIO3/SCL) →   SCL           I²C Takt
-Pin 6 (GND)       →   GND           Masse (Pin 2)
-Pin 6 (GND)       →   OE            Output Enable (dauerhaft aktiv)
+Raspberry Pi            PCA9685
+───────────────────────────────────────
+Pin 1  (3,3 V)      →   VCC   (Logikversorgung)
+Pin 3  (GPIO2/SDA)  →   SDA
+Pin 5  (GPIO3/SCL)  →   SCL
+Pin 6  (GND)        →   GND
+                        OE    offen lassen (intern auf aktiv gezogen)
 ```
 
-**Raspberry Pi GPIO-Header (Vorderseite, 2×20 Pin):**
-
 ```
-   3V3  [1] [2]  5V     ← Hier KEINE Verbindung zur 3.3V!
-   SDA  [3] [4]  5V     ← GPIO2 = SDA
-   SCL  [5] [6]  GND    ← GPIO3 = SCL, GND
+   3V3  [1] [2]  5V     ← Pin 1 = VCC des PCA9685 (NICHT 5 V!)
+   SDA  [3] [4]  5V
+   SCL  [5] [6]  GND
 ```
 
-### 2. PCA9685 ↔ Servos
+### PCA9685 ↔ Servos
 
-Der PCA9685 hat 16 Kanäle (0-15). Wir verwenden die ersten 5 für die Gelenke:
-
-```
-PCA9685        Gelenk    Servo-Typ           Signal-Pin
-───────────────────────────────────────────────────────
-PWM 0          J1        Metal MG996R        +Rot, GND, Signal(gelb)
-PWM 1          J2        MG996R              +Rot, GND, Signal(gelb)
-PWM 2          J3        MG90S               +Rot, GND, Signal(gelb)
-PWM 3          J4        MG90S               +Rot, GND, Signal(gelb)
-PWM 4          J5        MG90S               +Rot, GND, Signal(gelb)
-```
-
-**Servo-Stecker (Standard 3-Pin):**
+Servostecker: Signal (gelb/weiß) → PWM, Plus (rot) → V+, Masse (braun/schwarz) → GND.
 
 ```
-Servo-Stecker          PCA9685 Anschluss
-──────────────────────────────────────────
-Signal (gelb/weiß)  →  PWM-Pin (0-4)
-+Power (rot)        →  V+ (Schraubklemme)
-Ground (braun/schwarz) → GND (Schraubklemme)
+PCA9685-Kanal   Gelenk   Servo
+───────────────────────────────────
+ch0             J5       MG90S          Greifer
+ch1             J4       MG90S          Handgelenk
+ch2             J3       MG90S          Ellbogen
+ch3             —        (frei)
+ch4             J2       MG996R         Schulter
+ch5             J1       Metal MG996R   Basis
 ```
 
-### 3. Stromversorgung (KRITISCH!)
+### Stromversorgung
 
 ```
-┌──────────────────────────────────────────────┐
-│ Externe Stromversorgung (5-6V, min. 3.5A)   │
-│  + (Rot) → PCA9685 V+ (Schraubklemme)       │
-│  - (Schwarz) → PCA9685 GND (Schraubklemme)  │
-└──────────────────────────────────────────────┘
-                     │
-         ┌───────────┴───────────┐
-         │                       │
-         ↓                       ↓
-    Alle Servo-Plus      Alle Servo-Minus
-    (gemeinsame Leitung) (gemeinsame Leitung)
-         │                       │
-         └───────────┬───────────┘
-                     │
-              (Mit Pi GND verbunden)
+Netzteil 5–6 V ── + ──► PCA9685 V+ (Schraubklemme) ──► alle Servo-Plus
+               └─ − ──► PCA9685 GND (Schraubklemme) ──► alle Servo-Minus
+                                   │
+                                   └── gemeinsame Masse mit Pi-GND
 ```
 
-**Fehler vermeiden:**
-- ❌ **Nicht** den Pi's 5V-Pin für Servo-Stromversorgung verwenden
-- ❌ **Nicht** den Pi's 3.3V mit PCA9685 VCC verbinden (nur 3.3V für Logik)
-- ✅ **Immer** Pi und Servos mit gemeinsamer Masse (GND) verbinden
-
-### 4. Beispiel-Verdrahtungsdiagramm (ASCII)
-
-```
-                  Raspberry Pi 4
-                  ┌──────────────┐
-              3V3 │[1] [2] 5V    │
-              SDA │[3] [4] 5V    │
-              SCL │[5] [6] GND   │
-                  └───┬──────┬───┘
-                      │      │
-                    [SDA]  [SCL]
-                      │      │
-            ┌─────────┴──────┴─────┐
-            │   PCA9685 PWM Board  │
-            │ VCC (3.3V von Pi)    │
-            │ GND (mit Pi GND)     │
-            │ SDA / SCL            │
-            │                      │
-            │ PWM 0,1,2,3,4 (→Servos)
-            │ V+ / GND (Externe Stromvers.)
-            └──────┬──────────┬────┘
-                   │          │
-         ┌─────────┴┐      ┌──┴──────┐
-         │ +6V      │      │ GND     │
-         ↓          ↓      ↓         ↓
-    ┌────────┐ ┌────────┐ (gemeinsame Rückleitung)
-    │J1 Servo│ │J2 Servo│ (alle Servos teilen sich GND)
-    │MG996R  │ │MG996R  │
-    └────────┘ └────────┘
-    
-    ┌────────┐ ┌────────┐ ┌────────┐
-    │J3 Servo│ │J4 Servo│ │J5 Servo│
-    │MG90S   │ │MG90S   │ │MG90S   │
-    └────────┘ └────────┘ └────────┘
-```
+- ❌ Servos **nicht** aus dem 5-V-Pin des Pi versorgen.
+- ❌ VCC des PCA9685 **nicht** an 5 V – nur 3,3 V (Logik).
+- ✅ Pi-GND und Servo-GND immer verbinden.
 
 ---
 
 ## Installation
 
-### Schritt 1: Raspberry Pi vorbereiten
-
 ```bash
-# 1. SSH in den Pi (falls nicht lokal)
-ssh pi@<pi-ip>
-
-# 2. System aktualisieren
+# 1. System vorbereiten
 sudo apt update && sudo apt upgrade -y
+sudo apt install -y git
 
-# 3. Git und Python-Tools installieren
-sudo apt install -y git python3-pip python3-venv
-```
-
-### Schritt 2: I²C aktivieren
-
-```bash
-# Bearbeitungstool öffnen (oder via raspi-config)
-sudo nano /boot/firmware/config.txt
-
-# Suche nach dieser Zeile und stelle sicher, dass sie nicht kommentiert ist:
-# dtparam=i2c_arm=on
-
-# Falls nicht vorhanden, am Ende der Datei hinzufügen:
-# dtparam=i2c_arm=on
-
-# Speichern (Ctrl+X, dann Y, Enter)
-```
-
-**Alternativ mit raspi-config:**
-```bash
-sudo raspi-config
-# → Interface Options → I2C → Enable
-# → Finish
-```
-
-**I²C-Devices überprüfen:**
-```bash
-sudo i2cdetect -y 1
-
-# Erwartete Ausgabe:
-#      0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
-# 00:          -- -- -- -- -- -- -- -- -- -- -- -- --
-# 10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-# 20: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-# 30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-# 40: 40 -- -- -- -- -- -- -- -- -- -- -- -- -- -- --   ← 0x40 ist der PCA9685
-# ...
-```
-
-### Schritt 3: Repository klonen
-
-```bash
-# Repository auf dem Pi klonen
+# 2. Repository klonen
 cd ~
-git clone https://github.com/<dein-github>/kuka-arm.git
-cd kuka-arm
+git clone https://github.com/ProfessorEngineergit/kuka-arm-controller.git
+cd kuka-arm-controller
+
+# 3. Setup (I²C, venv, Hotspot, systemd-Service)
+sudo ./setup.sh
+sudo reboot
 ```
 
-### Schritt 4: Abhängigkeiten installieren
+`setup.sh` installiert aus dem Verzeichnis, in das geklont wurde, und legt –
+falls nicht vorhanden – eine `.env` an:
 
-```bash
-# Python Virtual Environment erstellen
-python3 -m venv venv
-source venv/bin/activate
-
-# Abhängigkeiten installieren
-pip install -r requirements.txt
-```
-
-### Schritt 5: Konfiguration
-
-```bash
-# .env-Datei erstellen
-nano .env
-
-# Folgende Inhalte eintragen:
+```ini
 WIFI_SSID=KUKA-ARM
-WIFI_PASSWORD=kuka1234
-LOGIN_USER=admin
-LOGIN_PASSWORD=kuka123
-SECRET_KEY=your-random-32-char-secret-key
+WIFI_PASSWORD=kuka1234   # bitte ändern
 PORT=80
 ```
 
-### Schritt 6: Setup-Skript ausführen
+Der Hotspot läuft über NetworkManager (`setup_hotspot.sh`, Verbindung
+`kuka-hotspot`, IP `192.168.4.1`). Achtung: das Einrichten trennt eine
+bestehende WLAN-/SSH-Verbindung.
 
 ```bash
-# Setup-Skript ausführbar machen
-chmod +x setup.sh
-chmod +x setup_hotspot.sh
-
-# Setup ausführen (erstellt Systemd-Service, etc.)
-sudo ./setup.sh
-```
-
-### Schritt 7: Hotspot konfigurieren (optional)
-
-Falls der Pi als **WiFi-Hotspot** fungieren soll:
-
-```bash
-# Hotspot einrichten
-sudo ./setup_hotspot.sh
-
-# Nach Reboot ist der Pi unter 192.168.4.1 erreichbar
-# Verbindung: KUKA-ARM, Passwort: kuka1234
-```
-
-### Schritt 8: App starten
-
-```bash
-# Manuell starten (für Tests)
-./start.sh
-
-# ODER Systemd-Service starten (läuft beim Boot automatisch)
-sudo systemctl start kuka-arm
+sudo systemctl start kuka-arm      # Service starten
 sudo systemctl status kuka-arm
+sudo journalctl -u kuka-arm -f     # Logs
+./start.sh                         # manuell (Vordergrund)
 ```
 
 ---
 
 ## Inbetriebnahme
 
-### 1. Hardware-Test
+### 1. Servo-Test (vor dem ersten Start)
 
-Nach der Verdrahtung **VOR der ersten Benutzung** testen:
+`test_servo.py` liest Kanäle, Grenzen und Pulsbreiten aus `robot.yaml` und
+fährt jedes Gelenk nur innerhalb seiner Grenzen (Home → Min → Max → Home):
 
 ```bash
-# Im kuka-arm-Verzeichnis:
-python3 test_servo.py
-
-# Folgende Abläufe sollten zu sehen sein:
-# - J1 (Basis) dreht langsam 0° → 180° → 0°
-# - J2 (Schulter) folgt
-# - J3-J5 folgen
-# Falls ein Servo nicht reagiert: Verdrahtung/PWM-Kanal überprüfen
+source venv/bin/activate
+python3 test_servo.py --list          # Kanalbelegung anzeigen
+python3 test_servo.py                 # alle Gelenke nacheinander (mit ENTER)
+python3 test_servo.py --joint J2      # ein Gelenk
+python3 test_servo.py --ch 3          # freien Kanal testen (0–180°, Warnung)
+python3 test_servo.py --scan          # I²C-Scan
 ```
 
-### 2. Web-Oberfläche aufrufen
+Bewegt sich beim Test von J2 ein anderes Gelenk, ist die Kanalbelegung in
+`robot.yaml` falsch – dort korrigieren, nirgendwo sonst.
 
-**Wenn Pi direkt mit Netzwerk verbunden:**
-```
-http://<pi-ip>:80
+### 2. Web-Oberfläche
+
+1. Mit dem WLAN **KUKA-ARM** verbinden.
+2. **http://192.168.4.1** öffnen (die Oberfläche braucht kein Internet).
+3. **FREIGABE** (Taste `F`), dann mit den J1–J5-Tasten, dem Joystick oder
+   kartesisch verfahren. **E-STOP** = `Leertaste`, quittieren = `Esc`, Home = `H`.
+
+Ohne PCA9685 (z. B. am PC) läuft der Controller im Simulationsmodus; die
+Statusleiste zeigt dann „SIMULATION“.
+
+### 3. Kalibrierung
+
+CFG → **Kalibrierung** zeigt die aktuellen Werte aus `robot.yaml`. Werte
+ändern und **Speichern** – nur geänderte Gelenke werden geschrieben, jede
+Änderung wird sofort wirksam. Der **Wizard** führt Gelenk für Gelenk durch
+Home, Min und Max. Kalibrierung und Programme lassen sich unter
+**Einstellungen → Lokale Backups** als ZIP sichern.
+
+Nach einer Änderung der DH-Tabelle: `python3 tools/generate_urdf.py`.
+
+---
+
+## Programme
+
+Eingebaut: `home`, `rotate_all` (jede Arm-Achse Min → Max → Home), `wave`,
+`gripper_test`. Eigene Programme liegen als JSON in `config/programs/`
+(Name: `A–Z a–z 0–9 _ -`) und werden beim Speichern geprüft:
+
+```json
+{
+  "label": "Greifen",
+  "description": "Greifer öffnen, absenken, schließen",
+  "steps": [
+    {"type": "jog",  "joint": 4, "target": "max", "speed": 20},
+    {"type": "jog",  "joint": 1, "target": 70,    "speed": 10},
+    {"type": "wait", "ms": 500},
+    {"type": "jog",  "joint": 4, "target": "min", "speed": 20},
+    {"type": "home"}
+  ]
+}
 ```
 
-**Wenn Pi als Hotspot läuft:**
-```
-1. WiFi-Netzwerk "KUKA-ARM" verbinden
-2. Browser öffnen: http://192.168.4.1
-3. Ein Gerät nach dem anderen verbinden (1 Session)
+- `joint`: Index 0–4 (= J1–J5). `target`: Winkel in ° oder `"min"`/`"max"`/`"home"`
+  (zur Laufzeit aus `robot.yaml`, folgt also jeder Kalibrierung).
+- `speed` in °/s, begrenzt auf Grundgeschwindigkeit und Servo-Limit.
+- **STOPP** beendet ein Programm; der Arm bleibt freigegeben und hält die Position.
+  Während ein Programm läuft, ist manuelles Verfahren gesperrt.
+
+---
+
+## Entwicklung & Tests
+
+Auf dem PC (ohne Hardware, Simulationsmodus):
+
+```bash
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements-dev.txt   # Blinka/RPi.GPIO ggf. weglassen
+uvicorn app.main:app --port 8000      # http://localhost:8000
+python -m pytest                      # Tests
+python tools/generate_urdf.py --check
 ```
 
-### 3. Erste Bewegungen
+Die Tests prüfen u. a., dass der Greifer die Pose nicht verändert, dass IK und
+URDF mit der Vorwärtskinematik übereinstimmen, dass README, `test_servo.py` und
+`robot.yaml` dieselben Kanäle/Grenzen haben, und dass E-Stop auch während einer
+laufenden Bewegung sofort greift. GitHub Actions führt sie bei jedem Push aus.
 
-```
-1. Oberfläche laden → "KUKA-ARM smartPAD bereit"
-2. [FREIGABE] Button drücken (grün)
-3. Mit Joystick oder Achsen-Schiebereglern testen
-4. [E-STOP] (rotes X) sollte sofort stoppen
-5. Nach E-Stop: [ESC]-Taste drücken um zu quittieren
-```
-
-### 4. Kalibrierung
-
-**Erste Kalibrierung durchführen:**
-```
-1. Menü: "Kalibrierung"
-2. Pro Gelenk (J1-J5):
-   - "Jetzt anfahren" drücken
-   - Roboter-Position von Hand einstellen
-   - "Position setzen" drücken
-   - Min/Max-Grenzen mit Buttons testen
-3. "Speichern" drücken → robot.yaml wird aktualisiert
-```
+| Pfad | Inhalt |
+|---|---|
+| `app/` | FastAPI-Backend: Kinematik, Servo-Ansteuerung, REST + WebSocket |
+| `static/` | Oberfläche (HTML/CSS/JS), `static/vendor/` = three.js, nipplejs (lokal) |
+| `config/robot.yaml` | Kanäle, Grenzen, Servotypen, DH-Tabelle |
+| `description/` | generierte URDF |
+| `tools/` | URDF-Generator |
+| `tests/` | pytest-Suite |
+| `docs/` | Simulationsauswertung, Roadmap |
 
 ---
 
 ## Fehlerbehebung
 
-### Problem: PCA9685 nicht erkannt
+**PCA9685 nicht erkannt** – `sudo i2cdetect -y 1` muss `40` zeigen. Sonst I²C
+aktivieren (`dtparam=i2c_arm=on` in `/boot/firmware/config.txt`, erledigt
+`setup.sh`), Verdrahtung SDA/SCL/GND/VCC prüfen, neu starten.
 
-**Symptom:** `I2C device 0x40 not found`
+**Falsches Gelenk bewegt sich** – `python3 test_servo.py --list` mit der
+Verkabelung vergleichen und `channel:` in `robot.yaml` korrigieren.
 
-**Lösungen:**
-1. I²C aktivieren überprüfen:
-   ```bash
-   sudo i2cdetect -y 1
-   # Sollte "40" in der Matrix zeigen
-   ```
+**Servos zittern / Pi startet neu** – Netzteil zu schwach (siehe
+[Netzteil](#netzteil-dimensionierung)), Elko ergänzen, Signalleitungen weg von
+Stromleitungen führen.
 
-2. Pin-Verdrahtung überprüfen:
-   - SDA (Pi Pin 3) → PCA9685 SDA
-   - SCL (Pi Pin 5) → PCA9685 SCL
-   - GND (Pi Pin 6) → PCA9685 GND
+**Arm sackt nach E-Stop ab** – erwartet, siehe [Sicherheit](#sicherheit).
 
-3. Pull-up-Widerstände:
-   - Oft schon auf dem PCA9685-Board vorhanden
-   - Falls nicht: 4.7kΩ zwischen SDA+3.3V und SCL+3.3V
-
-### Problem: Servos bewegen sich gar nicht
-
-**Überprüfung:**
-```bash
-# Test-Script mit Debugging starten
-python3 test_servo.py
-# → Sollte jeden Servo einzeln anfahren
-
-# Wenn keine Bewegung:
-# 1. Externe Stromversorgung überprüfen (Voltmeter: 5-6V zwischen V+ und GND)
-# 2. Servo-Stecker überprüfen (Signal/Plus/Minus richtig angesteckt?)
-# 3. Servo-Kanal in test_servo.py richtig?
-```
-
-### Problem: Servos zittern oder frieren
-
-**Ursachen:**
-- **Zu wenig Strom**: Netzteil-Ampere erhöhen
-- **Zu wenig Stabilisierung**: Große Kondensatoren (1000µF) zwischen V+ und GND hinzufügen
-- **Rauschen auf Signal**: Servo-Signal-Leitung weg von Stromkabeln führen
-
-**Erste Hilfe:**
-```bash
-# Wenn in Betrieb, Arm deaktivieren
-# (FREIGABE-Button)
-# → Servos geben sofort los
-```
-
-### Problem: Web-Oberfläche reagiert nicht
+**Web-Oberfläche nicht erreichbar**
 
 ```bash
-# Service-Status überprüfen
 sudo systemctl status kuka-arm
-
-# Logs ansehen
 sudo journalctl -u kuka-arm -f
-
-# Manuell starten (mit Output)
-cd /home/pi/kuka-arm
-source venv/bin/activate
-python3 app/main.py
+cd ~/kuka-arm-controller && ./start.sh     # manuell mit Ausgabe
 ```
 
-### Problem: Hotspot startet nicht
+**Hotspot startet nicht**
 
 ```bash
-# Hostapd Status überprüfen
-sudo systemctl status hostapd
-
-# Logs
-sudo journalctl -u hostapd -f
-
-# Neustart
-sudo systemctl restart hostapd dnsmasq
+nmcli con show                 # kuka-hotspot vorhanden?
+sudo nmcli con up kuka-hotspot
+journalctl -u NetworkManager -f
+sudo ./setup_hotspot.sh        # neu einrichten
 ```
 
-### Problem: Servo zuckt beim Einschalten
-
-**Normal**: Beim Power-up können Servos zucken (PCA9685 sucht sich Null-Punkt).
-
-**Wenn es problematisch ist:**
-1. Servo-Kalibrierung überprüfen (robot.yaml)
-2. External Power Supply durchmessen (sollte stabil 5-6V sein)
+**Servo zuckt beim Einschalten** – beim Start setzt der Controller sofort alle
+Home-Winkel. Steht der Arm vorher weit weg von Home, springt er einmal dorthin;
+vor dem Ausschalten daher Home anfahren.
 
 ---
 
 ## Sicherheit
 
-### Elektrische Sicherheit
+**Elektrisch:** Servos nur über das externe Netzteil versorgen, vor
+Verdrahtungsänderungen Netzteil ausschalten, Zuleitung Netzteil → PCA9685 ≥ 1 mm².
 
-- **Externe Stromversorgung verwenden** – nicht vom Pi
-- **Netzteil abschalten** vor Verdrahtungsänderungen
-- **Gesamtstrom überwachen** – bei >4A: Fehlersuche
-- **Kabelquerschnitt** – mindestens 1mm² für Servokabel
+**Bewegung:**
 
-### Mechanische Sicherheit
+- **E-STOP** (Oberfläche, `Leertaste` oder `POST /api/estop`) wird sofort
+  ausgeführt – auch während einer Bewegung und vor allen noch wartenden
+  Befehlen – und schaltet das PWM-Signal ab. Die Servos (MG996R/MG90S) sind
+  danach **kraftlos**: ein nicht ausbalancierter Arm sinkt unter seinem Gewicht
+  ab. Arm deshalb nicht über Hindernissen/Personen betreiben.
+- Nach dem Quittieren und erneuter Freigabe fährt der nächste Befehl von der
+  zuletzt gesendeten Position aus; ist der Arm abgesackt, springt er zuerst
+  dorthin zurück. Nach einem E-Stop zuerst **Home** fahren.
+- **FREIGABE** aus schaltet ebenfalls das PWM-Signal ab.
+- Programm-**STOPP** hält dagegen die Position (Servos bleiben bestromt).
+- Nach **10 min ohne Bedienung** wird der Arm automatisch deaktiviert.
+- Eine gehaltene Jog-Taste fährt nach dem Loslassen höchstens noch einen
+  Schritt (keine aufgestauten Befehle).
+- Achsgrenzen und Geschwindigkeitslimits werden serverseitig durchgesetzt,
+  unabhängig davon, was ein Client sendet.
 
-- **E-Stop** immer erreichbar (rotes X auf Web-Oberfläche)
-- **Freigabe-Schaltung** (grüner FREIGABE-Button) nutzen
-- **Arbeitsraum-Limits** im Konfigurationsmenu einstellen
-- **Beobachtung** während der Bewegung erforderlich
-- **Notfall**: Stromversorgung abschalten
+**Netzwerk:** Die Oberfläche hat bewusst **keinen Login**. Sie ist nur für das
+isolierte Hotspot-WLAN gedacht – Hotspot-Passwort ändern und den Pi nicht in
+ein offenes Netz hängen.
 
-### Software-Sicherheit
+---
 
-- **Einzige aktive Session** – neuer Login invalidiert alte
-- **Timeout nach 10 min** inaktiv – Arm deaktiviert sich selbst
-- **WebSocket-Verschlüsselung** (WSS) in Produktion nutzen
+## Externe Simulation (OmniSim)
+
+Das OmniLink-Team hat den Arm aus den öffentlichen Dateien in OmniSim
+nachgebaut, alle vier eingebauten Programme abgespielt und dabei drei
+Unstimmigkeiten im Repository gefunden. Ergebnisse und was daraus geändert
+wurde: [docs/omnisim-evaluation.md](docs/omnisim-evaluation.md).
 
 ---
 
 ## Weiterführende Ressourcen
 
-- **PCA9685 Datenblatt**: Adafruit PCA9685 Servo Driver
-- **Servo-Datenblätter**: MG996R, MG90S Spezifikationen
-- **Three.js Dokumentation**: https://threejs.org/docs/
-- **FastAPI Dokumentation**: https://fastapi.tiangolo.com/
-- **Raspberry Pi I²C**: https://www.raspberrypi.org/documentation/hardware/raspberrypi/spi/README.md
-
----
-
-## Support & Fehlerberichte
-
-Bugs oder Fragen? Öffne ein Issue auf GitHub oder kontaktiere den Maintainer.
+- Adafruit PCA9685 Servo Driver – Datenblatt und CircuitPython-Bibliothek
+- MG996R / MG90S Servo-Datenblätter
+- three.js: https://threejs.org/docs/ · FastAPI: https://fastapi.tiangolo.com/
+- URDF: https://wiki.ros.org/urdf/XML
 
 **Lizenz**: MIT
 
----
-
-**Letztes Update**: Mai 2026
+**Letztes Update**: September 2026

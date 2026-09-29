@@ -3,8 +3,7 @@
 # Debian Trixie does not use dhcpcd – NetworkManager handles everything.
 set -e
 
-REAL_USER="${SUDO_USER:-pi}"
-APP_DIR="/home/${REAL_USER}/kuka-arm"
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load .env
 if [ -f "$APP_DIR/.env" ]; then

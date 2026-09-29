@@ -13,10 +13,12 @@ from app.auth import (
     LOGIN_USER, LOGIN_PASSWORD, COOKIE_NAME,
     create_session, invalidate_session, require_auth, validate_token, get_token_from_request
 )
+from app import config
 from app.robot_state import robot, get_config
 from app.servo_controller import servo
-from app.coordinate_frames import compute_pose
-from app.programs import list_programs, save_program, delete_program, run_program
+from app.coordinate_frames import jog_cartesian
+from app.programs import (list_programs, save_program, delete_program, run_program,
+                          exists as program_exists, valid_name as valid_program_name)
 import yaml
 
 router = APIRouter()
@@ -57,14 +59,7 @@ async def auth_check(request: Request):
 @router.get("/api/status")
 async def status(request: Request):
     require_auth(request)
-    return {
-        "joints": robot.joints,
-        "pose": robot.pose,
-        "enabled": robot.enabled,
-        "estop": robot.estop,
-        "frame": robot.active_frame,
-        "program": robot.running_program,
-    }
+    return {**robot.state_dict(), "mock": servo.mock}
 
 
 # ─── Enable / Disable / E-Stop ───────────────────────────────────────────────
@@ -107,6 +102,20 @@ async def estop_acknowledge(request: Request):
 
 # ─── Jog ────────────────────────────────────────────────────────────────────
 
+def _require_motion_allowed():
+    if not robot.enabled or robot.estop:
+        raise HTTPException(status_code=400, detail="Arm nicht freigegeben")
+    if robot.running_program:
+        raise HTTPException(status_code=409, detail="Programm läuft – manuelles Verfahren gesperrt")
+    robot.touch()
+
+
+def _finite(value: float, lo: float, hi: float, what: str) -> float:
+    if value != value or value in (float("inf"), float("-inf")):
+        raise HTTPException(status_code=400, detail=f"Ungültiger Wert für {what}")
+    return max(lo, min(hi, float(value)))
+
+
 class JogRequest(BaseModel):
     joint: int
     angle: float
@@ -116,15 +125,12 @@ class JogRequest(BaseModel):
 @router.post("/api/jog")
 async def jog(body: JogRequest, request: Request):
     require_auth(request)
-    if not robot.enabled or robot.estop:
-        raise HTTPException(status_code=400, detail="Arm nicht freigegeben")
-    robot.touch()
+    _require_motion_allowed()
+    if not 0 <= body.joint < len(robot.joints):
+        raise HTTPException(status_code=400, detail="Ungültiger Gelenk-Index")
     target = list(robot.joints)
-    target[body.joint] = body.angle
-    new_joints = await servo.move_to(robot.joints, target, body.speed)
-    robot.joints = new_joints
-    robot.pose = compute_pose(robot.joints)
-    await robot.broadcast_state()
+    target[body.joint] = _finite(body.angle, 0.0, 180.0, "angle")
+    await robot.move(target, _finite(body.speed, 1.0, 100.0, "speed"))
     return {"joints": robot.joints, "pose": robot.pose}
 
 
@@ -140,20 +146,16 @@ class CartesianJogRequest(BaseModel):
 @router.post("/api/cartesian-jog")
 async def cartesian_jog(body: CartesianJogRequest, request: Request):
     require_auth(request)
-    if not robot.enabled or robot.estop:
-        raise HTTPException(status_code=400, detail="Arm nicht freigegeben")
-    robot.touch()
-    from app.coordinate_frames import jog_cartesian
-    new_joints = jog_cartesian(
-        robot.joints,
-        dx=body.dx, dy=body.dy, dz=body.dz,
-        da=body.da, db=body.db, dc=body.dc,
-        frame=body.frame,
+    _require_motion_allowed()
+    deltas = {k: _finite(getattr(body, k), -500.0, 500.0, k)
+              for k in ("dx", "dy", "dz", "da", "db", "dc")}
+    target, reason = jog_cartesian(
+        robot.joints, **deltas,
+        frame=body.frame if body.frame in ("WORLD", "TCP") else "WORLD",
     )
-    new_joints = await servo.move_to(robot.joints, new_joints, body.speed)
-    robot.joints = new_joints
-    robot.pose = compute_pose(robot.joints)
-    await robot.broadcast_state()
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    await robot.move(target, _finite(body.speed, 1.0, 100.0, "speed"))
     return {"joints": robot.joints, "pose": robot.pose}
 
 
@@ -162,13 +164,8 @@ async def cartesian_jog(body: CartesianJogRequest, request: Request):
 @router.post("/api/home")
 async def go_home(request: Request):
     require_auth(request)
-    if not robot.enabled or robot.estop:
-        raise HTTPException(status_code=400, detail="Arm nicht freigegeben")
-    robot.touch()
-    angles = servo.home()
-    robot.joints = list(angles)
-    robot.pose = compute_pose(robot.joints)
-    await robot.broadcast_state()
+    _require_motion_allowed()
+    await robot.move_home()
     return {"ok": True}
 
 
@@ -192,6 +189,9 @@ async def get_programs(request: Request):
     return list_programs()
 
 
+_program_tasks: set = set()
+
+
 @router.post("/api/programs/{name}/run")
 async def start_program(name: str, request: Request):
     require_auth(request)
@@ -199,17 +199,25 @@ async def start_program(name: str, request: Request):
         raise HTTPException(status_code=400, detail="Arm nicht freigegeben")
     if robot.running_program:
         raise HTTPException(status_code=400, detail="Programm läuft bereits")
+    if not program_exists(name):
+        raise HTTPException(status_code=404, detail="Programm nicht gefunden")
     robot.touch()
-    asyncio.create_task(run_program(name))
+    # Mark as running before the task starts so a second request can't race in.
+    robot.running_program = name
+    task = asyncio.create_task(run_program(name))
+    _program_tasks.add(task)              # keep a reference until it finishes
+    task.add_done_callback(_program_tasks.discard)
     return {"ok": True}
 
 
 @router.post("/api/programs/stop")
 async def stop_program(request: Request):
+    """Stop the running program. The arm stays enabled and holds its current
+    position (no PWM cut, so an unbalanced arm does not sag). E-Stop is the
+    way to cut power."""
     require_auth(request)
-    robot.running_program = None
-    robot.enabled = False
-    servo.stop_all()
+    if robot.running_program:
+        robot.program_abort = True
     await robot.broadcast_state()
     return {"ok": True}
 
@@ -223,13 +231,18 @@ class SaveProgramRequest(BaseModel):
 @router.post("/api/programs/{name}/save")
 async def save_prog(name: str, body: SaveProgramRequest, request: Request):
     require_auth(request)
-    save_program(name, body.label, body.description, body.steps)
+    try:
+        save_program(name, body.label, body.description, body.steps)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}
 
 
 @router.delete("/api/programs/{name}")
 async def delete_prog(name: str, request: Request):
     require_auth(request)
+    if not valid_program_name(name):
+        raise HTTPException(status_code=400, detail="Ungültiger Programmname")
     if not delete_program(name):
         raise HTTPException(status_code=404, detail="Programm nicht gefunden")
     return {"ok": True}
@@ -244,6 +257,8 @@ async def get_robot_config(request: Request):
     return {
         "joints": cfg["joints"],
         "servos": cfg["servos"],
+        "dh_parameters": cfg["dh_parameters"],
+        "mock": servo.mock,
     }
 
 
@@ -262,13 +277,11 @@ SERVO_ABS_MAX = 180.0
 @router.post("/api/calibrate")
 async def calibrate(body: CalibrationRequest, request: Request):
     require_auth(request)
-    cfg_path = "config/robot.yaml"
 
     if body.field not in ("home_angle", "min_angle", "max_angle"):
         raise HTTPException(status_code=400, detail="Ungültiges Feld")
 
-    with open(cfg_path) as f:
-        cfg = yaml.safe_load(f)
+    cfg = config.load_file(config.CONFIG_PATH)
 
     joints = cfg.get("joints", [])
     if not isinstance(body.joint, int) or not (0 <= body.joint < len(joints)):
@@ -306,8 +319,7 @@ async def calibrate(body: CalibrationRequest, request: Request):
     j["max_angle"] = new_max
     j["home_angle"] = new_home
 
-    with open(cfg_path, "w") as f:
-        yaml.dump(cfg, f, allow_unicode=True)
+    config.save(cfg)
 
     # Apply immediately so the live servo controller respects the new limits
     # without requiring a restart.
@@ -323,15 +335,19 @@ class SpeedRequest(BaseModel):
 
 @router.post("/api/config/speed")
 async def set_speed(body: SpeedRequest, request: Request):
+    """Set default_speed (°/s). Capped at the fastest servo's max_speed_dps;
+    each joint is additionally capped at its own servo's limit while moving."""
     require_auth(request)
-    cfg_path = "config/robot.yaml"
-    with open(cfg_path) as f:
-        cfg = yaml.safe_load(f)
-    cfg["servos"]["default_speed"] = body.speed
-    with open(cfg_path, "w") as f:
-        yaml.dump(cfg, f, allow_unicode=True)
-    servo.default_speed = body.speed
-    return {"ok": True}
+    cfg = config.load_file(config.CONFIG_PATH)
+    cap = max(float(t.get("max_speed_dps", 0)) for t in cfg["servos"]["types"].values())
+    speed = body.speed
+    if speed != speed or not 1.0 <= speed <= cap:
+        raise HTTPException(status_code=400, detail=f"Geschwindigkeit muss zwischen 1 und {cap:g} °/s liegen")
+    cfg["servos"]["default_speed"] = float(speed)
+    config.save(cfg)
+    from app.robot_state import reload_config
+    reload_config()
+    return {"ok": True, "speed": float(speed)}
 
 
 # ─── Backup / Restore ─────────────────────────────────────────────────────────
@@ -344,12 +360,12 @@ async def export_backup(request: Request):
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
         # Add robot.yaml
-        if os.path.exists("config/robot.yaml"):
-            with open("config/robot.yaml", "r") as f:
+        if os.path.exists(config.CONFIG_PATH):
+            with open(config.CONFIG_PATH, "r", encoding="utf-8") as f:
                 zf.writestr("robot.yaml", f.read())
 
         # Add all program files
-        programs_dir = "config/programs"
+        programs_dir = str(config.PROGRAMS_DIR)
         if os.path.exists(programs_dir):
             for filename in os.listdir(programs_dir):
                 if filename.endswith(".json"):
@@ -390,9 +406,12 @@ def _validate_robot_config(cfg: dict):
         raise ValueError(
             f"robot.yaml: {len(joints)} Gelenke, erwartet {expected}")
 
+    channels = set()
     for idx, j in enumerate(joints):
         if not isinstance(j, dict):
             raise ValueError(f"Gelenk {idx}: ungültig")
+        if j.get("type", "revolute") not in config.JOINT_TYPES:
+            raise ValueError(f"Gelenk {idx}: unbekannter Typ '{j.get('type')}'")
         for key in ("channel", "min_angle", "max_angle", "home_angle"):
             if key not in j:
                 raise ValueError(f"Gelenk {idx}: '{key}' fehlt")
@@ -405,6 +424,9 @@ def _validate_robot_config(cfg: dict):
             raise ValueError(f"Gelenk {idx}: nicht-numerische Werte")
         if not (0 <= ch <= 15):
             raise ValueError(f"Gelenk {idx}: Kanal {ch} außerhalb 0–15")
+        if ch in channels:
+            raise ValueError(f"Gelenk {idx}: Kanal {ch} ist doppelt belegt")
+        channels.add(ch)
         if not (0.0 <= mn < mx <= 180.0):
             raise ValueError(
                 f"Gelenk {idx}: ungültiger Bereich {mn}–{mx} (0 ≤ min < max ≤ 180)")
@@ -415,6 +437,17 @@ def _validate_robot_config(cfg: dict):
     servos = cfg.get("servos")
     if not isinstance(servos, dict) or "frequency" not in servos:
         raise ValueError("robot.yaml: 'servos' Sektion fehlt/ungültig")
+
+    dh = cfg.get("dh_parameters")
+    if not isinstance(dh, list) or not dh:
+        raise ValueError("robot.yaml: 'dh_parameters' fehlt oder leer")
+    for idx, row in enumerate(dh):
+        if not isinstance(row, list) or len(row) != 4:
+            raise ValueError(f"DH-Zeile {idx + 1}: erwartet [a, alpha, d, theta_offset]")
+        try:
+            [float(v) for v in row]
+        except (TypeError, ValueError):
+            raise ValueError(f"DH-Zeile {idx + 1}: nicht-numerische Werte")
 
 
 @router.post("/api/backup/import")
@@ -455,7 +488,7 @@ async def import_backup(request: Request, file: UploadFile = File(...)):
             _validate_robot_config(parsed)
 
             # Collect program files (zip-slip safe: basename only, size capped).
-            programs_dir = "config/programs"
+            programs_dir = str(config.PROGRAMS_DIR)
             restored_programs = []
             for info in infos:
                 fn = info.filename
@@ -463,7 +496,7 @@ async def import_backup(request: Request, file: UploadFile = File(...)):
                     if info.file_size > MAX_PROGRAM_BYTES:
                         continue
                     safe_name = os.path.basename(fn)
-                    if not safe_name or safe_name.startswith("."):
+                    if not valid_program_name(safe_name[:-5]):
                         continue
                     data = zf.read(fn)
                     try:
@@ -473,7 +506,7 @@ async def import_backup(request: Request, file: UploadFile = File(...)):
                     restored_programs.append((safe_name, data))
 
             # All validation passed — commit changes.
-            with open("config/robot.yaml", "w") as f:
+            with open(config.CONFIG_PATH, "w", encoding="utf-8") as f:
                 f.write(robot_config_data)
             os.makedirs(programs_dir, exist_ok=True)
             for safe_name, data in restored_programs:

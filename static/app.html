@@ -147,12 +147,15 @@
             <div>
               <div style="font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--t3);margin-bottom:6px;">Rotation</div>
               <div class="cart-grid">
-                <div class="cart-btn" onmousedown="startCartJog({da:1})" onmouseup="stopCartJog()">+A</div>
-                <div class="cart-btn" onmousedown="startCartJog({db:1})" onmouseup="stopCartJog()">+B</div>
-                <div class="cart-btn" onmousedown="startCartJog({dc:1})" onmouseup="stopCartJog()">+C</div>
-                <div class="cart-btn" onmousedown="startCartJog({da:-1})" onmouseup="stopCartJog()">−A</div>
-                <div class="cart-btn" onmousedown="startCartJog({db:-1})" onmouseup="stopCartJog()">−B</div>
-                <div class="cart-btn" onmousedown="startCartJog({dc:-1})" onmouseup="stopCartJog()">−C</div>
+                <div class="cart-btn locked" title="4-Achs-Arm: Gier A folgt J1">+A</div>
+                <div class="cart-btn" onmousedown="startCartJog({db:1})" onmouseup="stopCartJog()" ontouchstart="startCartJog({db:1})" ontouchend="stopCartJog()">+B</div>
+                <div class="cart-btn locked" title="Keine Roll-Achse: J5 ist der Greifer">+C</div>
+                <div class="cart-btn locked" title="4-Achs-Arm: Gier A folgt J1">−A</div>
+                <div class="cart-btn" onmousedown="startCartJog({db:-1})" onmouseup="stopCartJog()" ontouchstart="startCartJog({db:-1})" ontouchend="stopCartJog()">−B</div>
+                <div class="cart-btn locked" title="Keine Roll-Achse: J5 ist der Greifer">−C</div>
+              </div>
+              <div style="font-size:9px;color:var(--t3);margin-top:6px;max-width:180px;line-height:1.4;">
+                4 Arm-Achsen: X/Y/Z + Neigung B.<br>A folgt der Basis, C gibt es nicht (J5 = Greifer).
               </div>
             </div>
           </div>
@@ -290,7 +293,11 @@
           <div style="max-width:320px;">
             <div class="form-group">
               <label class="form-label">Standard-Geschwindigkeit (°/s)</label>
-              <input class="form-input" type="number" id="inp-speed" min="1" max="180" value="25">
+              <input class="form-input" type="number" id="inp-speed" min="1" max="30" step="1" value="8">
+              <div style="font-size:10px;color:var(--t3);margin-top:4px;">
+                Jede Achse ist zusätzlich auf das Limit ihres Servos begrenzt (MG996R 20 °/s, MG90S 30 °/s).
+                Der Override-Regler ist ein Prozentsatz davon.
+              </div>
             </div>
             <button class="btn btn-orange" onclick="saveSpeed()">Übernehmen</button>
 
@@ -435,14 +442,14 @@
 
 </div><!-- /smartpad-frame -->
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.1/dist/nipplejs.min.js"></script>
+<!-- Served locally: the Pi's hotspot has no internet (see static/vendor/README.md) -->
+<script src="/static/vendor/three.min.js"></script>
+<script src="/static/vendor/OrbitControls.js"></script>
+<script src="/static/vendor/nipplejs.js"></script>
+<script src="/static/js/axis_panel.js"></script>
 <script src="/static/js/ui.js"></script>
 <script src="/static/js/robot3d.js"></script>
-<script src="/static/js/axis_panel.js"></script>
 <script src="/static/js/joystick.js"></script>
-<script src="/static/js/coordinate.js"></script>
 <script src="/static/js/programs.js"></script>
 <script src="/static/js/calibration-wizard.js"></script>
 <script src="/static/js/main.js"></script>
