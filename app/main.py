@@ -1,26 +1,29 @@
 import asyncio
-import os
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app import config
 from app.routes.api import router as api_router
 from app.routes.ws import router as ws_router
 from app.robot_state import robot
 from app.coordinate_frames import compute_pose
 
+STATIC_DIR = config.ROOT_DIR / "static"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    robot.joints = [j["home_angle"] for j in __import__("app.robot_state", fromlist=["get_config"]).get_config()["joints"]]
+    robot.joints = [float(j["home_angle"]) for j in config.get()["joints"]]
     robot.pose = compute_pose(robot.joints)
-    asyncio.create_task(_inactivity_watchdog())
+    watchdog = asyncio.create_task(_inactivity_watchdog())
     yield
+    watchdog.cancel()
 
 
 async def _inactivity_watchdog():
@@ -37,9 +40,9 @@ async def _inactivity_watchdog():
 app = FastAPI(title="KUKA-ARM Controller", lifespan=lifespan)
 app.include_router(api_router)
 app.include_router(ws_router)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")
 async def root():
-    return FileResponse("static/app.html")
+    return FileResponse(STATIC_DIR / "app.html")
