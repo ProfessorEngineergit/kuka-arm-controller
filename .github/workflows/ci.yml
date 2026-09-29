@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        # Hardware libraries (Blinka, RPi.GPIO, PCA9685) are skipped: the
+        # controller falls back to mock mode without a PCA9685.
+        run: |
+          grep -viE '^(adafruit|rpi\.gpio)' requirements.txt > /tmp/requirements-ci.txt
+          pip install -r /tmp/requirements-ci.txt numpy pytest httpx
+      - name: URDF up to date with robot.yaml
+        run: python tools/generate_urdf.py --check
+      - name: Tests
+        run: python -m pytest -q

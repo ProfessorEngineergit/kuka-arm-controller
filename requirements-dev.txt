@@ -1,0 +1,5 @@
+# Test dependencies (PC / CI). On the Pi numpy comes from apt (python3-numpy).
+-r requirements.txt
+numpy
+pytest
+httpx

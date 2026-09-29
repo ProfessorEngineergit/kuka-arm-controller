@@ -5,7 +5,8 @@ set -e
 
 # Detect the real user who called sudo (falls back to pi)
 REAL_USER="${SUDO_USER:-pi}"
-APP_DIR="/home/${REAL_USER}/kuka-arm"
+# Install from wherever the repository was cloned (e.g. ~/kuka-arm-controller)
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "=== KUKA-ARM Setup ==="
 echo "Benutzer:                 $REAL_USER"
 echo "Installationsverzeichnis: $APP_DIR"
@@ -16,9 +17,6 @@ if [ ! -f "$APP_DIR/.env" ]; then
   cat > "$APP_DIR/.env" <<'ENVEOF'
 WIFI_SSID=KUKA-ARM
 WIFI_PASSWORD=kuka1234
-LOGIN_USER=admin
-LOGIN_PASSWORD=kuka123
-SECRET_KEY=changeme_generate_random_32_chars_here
 PORT=80
 ENVEOF
   echo "      Bitte .env anpassen: nano $APP_DIR/.env"
@@ -28,7 +26,7 @@ fi
 echo "[1/6] System-Pakete installieren..."
 apt-get update -q
 apt-get install -y python3 python3-pip python3-venv git i2c-tools \
-  python3-numpy python3-scipy
+  python3-numpy
 
 # ── 2. I²C aktivieren ────────────────────────────────────────
 echo "[2/6] I²C aktivieren..."
@@ -48,7 +46,7 @@ fi
 # ── 3. Python Virtual Environment ────────────────────────────
 echo "[3/6] Python-Umgebung einrichten..."
 cd "$APP_DIR"
-# --system-site-packages lets the venv use apt-installed numpy/scipy
+# --system-site-packages lets the venv use the apt-installed numpy
 python3 -m venv --system-site-packages venv
 source venv/bin/activate
 pip install --upgrade pip -q
@@ -64,7 +62,7 @@ chmod +x "$APP_DIR/setup_hotspot.sh"
 
 # ── 5. WiFi Hotspot ───────────────────────────────────────────
 echo "[5/6] WiFi-Hotspot konfigurieren..."
-bash "$APP_DIR/setup_hotspot.sh"
+SUDO_USER="$REAL_USER" bash "$APP_DIR/setup_hotspot.sh"
 
 # ── 6. Systemd Service ────────────────────────────────────────
 echo "[6/6] Systemd-Service einrichten..."
@@ -97,7 +95,7 @@ echo "Starte den Service: sudo systemctl start kuka-arm"
 echo "Status prüfen:      sudo systemctl status kuka-arm"
 echo "Logs:               sudo journalctl -u kuka-arm -f"
 echo ""
-echo "Verbinde dich mit WLAN '$(grep WIFI_SSID .env | cut -d= -f2)'"
+echo "Verbinde dich mit WLAN '$(grep WIFI_SSID "$APP_DIR/.env" | cut -d= -f2)'"
 echo "und öffne: http://192.168.4.1"
 echo ""
 echo "HINWEIS: Neustart empfohlen damit I²C und WLAN aktiv werden."
