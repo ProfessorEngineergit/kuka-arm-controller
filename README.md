@@ -1,10 +1,10 @@
-# KUKA-ARM – 5-DOF Roboterarm mit Raspberry Pi
+# KUKA-ARM - 5-DOF Roboterarm mit Raspberry Pi
 
 Web-Controller für einen 3D-gedruckten Desktop-Roboterarm: vier Arm-Achsen
 plus Greifer, angesteuert von einem Raspberry Pi über einen PCA9685
 16-Kanal-PWM-Treiber. Die Bedienoberfläche ist einem KUKA smartPAD
 nachempfunden (Achs- und kartesisches Verfahren, Programme, Kalibrierung,
-3D-Ansicht) und läuft im Browser – der Pi spannt dafür ein eigenes WLAN auf.
+3D-Ansicht) und läuft im Browser - der Pi spannt dafür ein eigenes WLAN auf.
 
 > **Eine Quelle für alles:** [`config/robot.yaml`](config/robot.yaml) ist die
 > einzige Stelle, an der Kanäle, Grenzen und Kinematik stehen. Controller,
@@ -36,9 +36,9 @@ nachempfunden (Achs- und kartesisches Verfahren, Programme, Kalibrierung,
 |---|---|---|---|
 | **Raspberry Pi** | 4B oder neuer | Steuerung + Web-Server | Raspberry Pi OS (Debian Trixie) |
 | **PCA9685** | 16-Kanal PWM-Treiber | Servo-PWM-Erzeugung | I²C, Adresse 0x40 |
-| **J1–J2** | Metal MG996R / MG996R | Basis, Schulter | 500–2500 µs |
-| **J3–J5** | MG90S | Ellbogen, Handgelenk, Greifer | 600–2400 µs (konservativ) |
-| **Stromversorgung** | 5–6 V, ≥ 5 A | Servos | **Nicht** vom Pi! |
+| **J1-J2** | Metal MG996R / MG996R | Basis, Schulter | 500-2500 µs |
+| **J3-J5** | MG90S | Ellbogen, Handgelenk, Greifer | 600-2400 µs (konservativ) |
+| **Stromversorgung** | 5-6 V, ≥ 5 A | Servos | **Nicht** vom Pi! |
 
 ### Kanalbelegung und Achsgrenzen
 
@@ -46,13 +46,13 @@ Per Hardware-Test verifiziert am 2026-05-18. Kanal 3 ist frei.
 
 | Gelenk | Funktion | PCA9685-Kanal | Servo | Bereich | Home |
 |---|---|---|---|---|---|
-| **J1** | Basis | 5 | Metal MG996R | 0–180° | 90° |
-| **J2** | Schulter | 4 | MG996R | 30–150° | 90° |
-| **J3** | Ellbogen | 2 | MG90S | 0–160° | 90° |
-| **J4** | Handgelenk | 1 | MG90S | 0–180° | 90° |
-| **J5** | Greifer | 0 | MG90S | 0–90° | 0° |
+| **J1** | Basis | 5 | Metal MG996R | 0-180° | 90° |
+| **J2** | Schulter | 4 | MG996R | 30-150° | 90° |
+| **J3** | Ellbogen | 2 | MG90S | 0-160° | 90° |
+| **J4** | Handgelenk | 1 | MG90S | 0-180° | 90° |
+| **J5** | Greifer | 0 | MG90S | 0-90° | 0° |
 
-Winkel sind Servo-Winkel (0–180°, 90° = Servo-Mitte). `python3 test_servo.py --list`
+Winkel sind Servo-Winkel (0-180°, 90° = Servo-Mitte). `python3 test_servo.py --list`
 zeigt dieselbe Tabelle direkt aus `robot.yaml`.
 
 ### Pulsbreiten und Geschwindigkeit
@@ -119,12 +119,12 @@ python3 tools/generate_urdf.py --check  # nur prüfen
 
 | Servo | Anzahl | Betrieb (ca.) | Blockierstrom (ca., 6 V) |
 |---|---|---|---|
-| MG996R (J1, J2) | 2 | 0,5–0,9 A | 2,5 A |
-| MG90S (J3–J5) | 3 | 0,1–0,3 A | 0,7 A |
+| MG996R (J1, J2) | 2 | 0,5-0,9 A | 2,5 A |
+| MG90S (J3-J5) | 3 | 0,1-0,3 A | 0,7 A |
 | **Summe** | | **≈ 2,7 A** | **≈ 7 A** |
 
-**Empfehlung:** 5–6 V mit **mindestens 5 A** (z. B. Mean Well LRS-50-5, 10 A).
-Ein unterdimensioniertes Netzteil bricht beim Anfahren unter Last ein – die
+**Empfehlung:** 5-6 V mit **mindestens 5 A** (z. B. Mean Well LRS-50-5, 10 A).
+Ein unterdimensioniertes Netzteil bricht beim Anfahren unter Last ein - die
 Servos zittern und der Pi kann neu starten. Ein 1000 µF-Elko an V+/GND des
 PCA9685 puffert Stromspitzen.
 
@@ -160,7 +160,7 @@ PCA9685-Kanal   Gelenk   Servo
 ch0             J5       MG90S          Greifer
 ch1             J4       MG90S          Handgelenk
 ch2             J3       MG90S          Ellbogen
-ch3             —        (frei)
+ch3             -        (frei)
 ch4             J2       MG996R         Schulter
 ch5             J1       Metal MG996R   Basis
 ```
@@ -168,14 +168,14 @@ ch5             J1       Metal MG996R   Basis
 ### Stromversorgung
 
 ```
-Netzteil 5–6 V ── + ──► PCA9685 V+ (Schraubklemme) ──► alle Servo-Plus
+Netzteil 5-6 V ── + ──► PCA9685 V+ (Schraubklemme) ──► alle Servo-Plus
                └─ − ──► PCA9685 GND (Schraubklemme) ──► alle Servo-Minus
                                    │
                                    └── gemeinsame Masse mit Pi-GND
 ```
 
 - ❌ Servos **nicht** aus dem 5-V-Pin des Pi versorgen.
-- ❌ VCC des PCA9685 **nicht** an 5 V – nur 3,3 V (Logik).
+- ❌ VCC des PCA9685 **nicht** an 5 V - nur 3,3 V (Logik).
 - ✅ Pi-GND und Servo-GND immer verbinden.
 
 ---
@@ -197,8 +197,8 @@ sudo ./setup.sh
 sudo reboot
 ```
 
-`setup.sh` installiert aus dem Verzeichnis, in das geklont wurde, und legt –
-falls nicht vorhanden – eine `.env` an:
+`setup.sh` installiert aus dem Verzeichnis, in das geklont wurde, und legt -
+falls nicht vorhanden - eine `.env` an:
 
 ```ini
 WIFI_SSID=KUKA-ARM
@@ -231,18 +231,18 @@ source venv/bin/activate
 python3 test_servo.py --list          # Kanalbelegung anzeigen
 python3 test_servo.py                 # alle Gelenke nacheinander (mit ENTER)
 python3 test_servo.py --joint J2      # ein Gelenk
-python3 test_servo.py --ch 3          # freien Kanal testen (0–180°, Warnung)
+python3 test_servo.py --ch 3          # freien Kanal testen (0-180°, Warnung)
 python3 test_servo.py --scan          # I²C-Scan
 ```
 
 Bewegt sich beim Test von J2 ein anderes Gelenk, ist die Kanalbelegung in
-`robot.yaml` falsch – dort korrigieren, nirgendwo sonst.
+`robot.yaml` falsch - dort korrigieren, nirgendwo sonst.
 
 ### 2. Web-Oberfläche
 
 1. Mit dem WLAN **KUKA-ARM** verbinden.
 2. **http://192.168.4.1** öffnen (die Oberfläche braucht kein Internet).
-3. **FREIGABE** (Taste `F`), dann mit den J1–J5-Tasten, dem Joystick oder
+3. **FREIGABE** (Taste `F`), dann mit den J1-J5-Tasten, dem Joystick oder
    kartesisch verfahren. **E-STOP** = `Leertaste`, quittieren = `Esc`, Home = `H`.
 
 Ohne PCA9685 (z. B. am PC) läuft der Controller im Simulationsmodus; die
@@ -251,7 +251,7 @@ Statusleiste zeigt dann „SIMULATION“.
 ### 3. Kalibrierung
 
 CFG → **Kalibrierung** zeigt die aktuellen Werte aus `robot.yaml`. Werte
-ändern und **Speichern** – nur geänderte Gelenke werden geschrieben, jede
+ändern und **Speichern** - nur geänderte Gelenke werden geschrieben, jede
 Änderung wird sofort wirksam. Der **Wizard** führt Gelenk für Gelenk durch
 Home, Min und Max. Kalibrierung und Programme lassen sich unter
 **Einstellungen → Lokale Backups** als ZIP sichern.
@@ -264,7 +264,7 @@ Nach einer Änderung der DH-Tabelle: `python3 tools/generate_urdf.py`.
 
 Eingebaut: `home`, `rotate_all` (jede Arm-Achse Min → Max → Home), `wave`,
 `gripper_test`. Eigene Programme liegen als JSON in `config/programs/`
-(Name: `A–Z a–z 0–9 _ -`) und werden beim Speichern geprüft:
+(Name: `A-Z a-z 0-9 _ -`) und werden beim Speichern geprüft:
 
 ```json
 {
@@ -280,7 +280,7 @@ Eingebaut: `home`, `rotate_all` (jede Arm-Achse Min → Max → Home), `wave`,
 }
 ```
 
-- `joint`: Index 0–4 (= J1–J5). `target`: Winkel in ° oder `"min"`/`"max"`/`"home"`
+- `joint`: Index 0-4 (= J1-J5). `target`: Winkel in ° oder `"min"`/`"max"`/`"home"`
   (zur Laufzeit aus `robot.yaml`, folgt also jeder Kalibrierung).
 - `speed` in °/s, begrenzt auf Grundgeschwindigkeit und Servo-Limit.
 - **STOPP** beendet ein Programm; der Arm bleibt freigegeben und hält die Position.
@@ -319,18 +319,18 @@ laufenden Bewegung sofort greift. GitHub Actions führt sie bei jedem Push aus.
 
 ## Fehlerbehebung
 
-**PCA9685 nicht erkannt** – `sudo i2cdetect -y 1` muss `40` zeigen. Sonst I²C
+**PCA9685 nicht erkannt** - `sudo i2cdetect -y 1` muss `40` zeigen. Sonst I²C
 aktivieren (`dtparam=i2c_arm=on` in `/boot/firmware/config.txt`, erledigt
 `setup.sh`), Verdrahtung SDA/SCL/GND/VCC prüfen, neu starten.
 
-**Falsches Gelenk bewegt sich** – `python3 test_servo.py --list` mit der
+**Falsches Gelenk bewegt sich** - `python3 test_servo.py --list` mit der
 Verkabelung vergleichen und `channel:` in `robot.yaml` korrigieren.
 
-**Servos zittern / Pi startet neu** – Netzteil zu schwach (siehe
+**Servos zittern / Pi startet neu** - Netzteil zu schwach (siehe
 [Netzteil](#netzteil-dimensionierung)), Elko ergänzen, Signalleitungen weg von
 Stromleitungen führen.
 
-**Arm sackt nach E-Stop ab** – erwartet, siehe [Sicherheit](#sicherheit).
+**Arm sackt nach E-Stop ab** - erwartet, siehe [Sicherheit](#sicherheit).
 
 **Web-Oberfläche nicht erreichbar**
 
@@ -349,7 +349,7 @@ journalctl -u NetworkManager -f
 sudo ./setup_hotspot.sh        # neu einrichten
 ```
 
-**Servo zuckt beim Einschalten** – beim Start setzt der Controller sofort alle
+**Servo zuckt beim Einschalten** - beim Start setzt der Controller sofort alle
 Home-Winkel. Steht der Arm vorher weit weg von Home, springt er einmal dorthin;
 vor dem Ausschalten daher Home anfahren.
 
@@ -363,8 +363,8 @@ Verdrahtungsänderungen Netzteil ausschalten, Zuleitung Netzteil → PCA9685 ≥
 **Bewegung:**
 
 - **E-STOP** (Oberfläche, `Leertaste` oder `POST /api/estop`) wird sofort
-  ausgeführt – auch während einer Bewegung und vor allen noch wartenden
-  Befehlen – und schaltet das PWM-Signal ab. Die Servos (MG996R/MG90S) sind
+  ausgeführt - auch während einer Bewegung und vor allen noch wartenden
+  Befehlen - und schaltet das PWM-Signal ab. Die Servos (MG996R/MG90S) sind
   danach **kraftlos**: ein nicht ausbalancierter Arm sinkt unter seinem Gewicht
   ab. Arm deshalb nicht über Hindernissen/Personen betreiben.
 - Nach dem Quittieren und erneuter Freigabe fährt der nächste Befehl von der
@@ -379,7 +379,7 @@ Verdrahtungsänderungen Netzteil ausschalten, Zuleitung Netzteil → PCA9685 ≥
   unabhängig davon, was ein Client sendet.
 
 **Netzwerk:** Die Oberfläche hat bewusst **keinen Login**. Sie ist nur für das
-isolierte Hotspot-WLAN gedacht – Hotspot-Passwort ändern und den Pi nicht in
+isolierte Hotspot-WLAN gedacht - Hotspot-Passwort ändern und den Pi nicht in
 ein offenes Netz hängen.
 
 ---
@@ -395,7 +395,7 @@ wurde: [docs/omnisim-evaluation.md](docs/omnisim-evaluation.md).
 
 ## Weiterführende Ressourcen
 
-- Adafruit PCA9685 Servo Driver – Datenblatt und CircuitPython-Bibliothek
+- Adafruit PCA9685 Servo Driver - Datenblatt und CircuitPython-Bibliothek
 - MG996R / MG90S Servo-Datenblätter
 - three.js: https://threejs.org/docs/ · FastAPI: https://fastapi.tiangolo.com/
 - URDF: https://wiki.ros.org/urdf/XML
@@ -404,6 +404,6 @@ wurde: [docs/omnisim-evaluation.md](docs/omnisim-evaluation.md).
 
 **Letztes Update**: September 2026
 
-## Entwicklung und KI-Beteiligung
+## KI-Beteiligung
 
-Die Historie des Hauptbranches enthält ausdrücklich Claude zugeschriebene Beiträge ([Beispiel](https://github.com/ProfessorEngineergit/kuka-arm-controller/commit/0f97940a7c5c0207ef1a4d369720d465f954a46a)). Das belegt KI-Beteiligung an diesen Beiträgen, nicht die Herkunft jeder Zeile oder eine unabhängige Prüfung. Bestehende Autor-, Co-Autoren- und Sitzungsangaben bleiben erhalten.
+Einzelne Code-Beiträge sind ausdrücklich KI-Tools zugeschrieben: [generated with Claude Code](https://github.com/ProfessorEngineergit/kuka-arm-controller/commit/5b064a58fe6b9df0801dac72f284543ed6893a1c). Das gilt für diese Beiträge, nicht pauschal für alle Dateien.
