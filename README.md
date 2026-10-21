@@ -46,11 +46,11 @@ Per Hardware-Test verifiziert am 2026-05-18. Kanal 3 ist frei.
 
 | Gelenk | Funktion | PCA9685-Kanal | Servo | Bereich | Home |
 |---|---|---|---|---|---|
-| **J1** | Basis | 5 | Metal MG996R | 0-180° | 90° |
-| **J2** | Schulter | 4 | MG996R | 30-150° | 90° |
-| **J3** | Ellbogen | 2 | MG90S | 0-160° | 90° |
-| **J4** | Handgelenk | 1 | MG90S | 0-180° | 90° |
-| **J5** | Greifer | 0 | MG90S | 0-90° | 0° |
+| **J1** | Basis | 5 | Metal MG996R | 0–180° | 90° |
+| **J2** | Schulter | 4 | MG996R | 30–150° | 90° |
+| **J3** | Ellbogen | 2 | MG90S | 0–160° | 90° |
+| **J4** | Handgelenk | 1 | MG90S | 0–180° | 90° |
+| **J5** | Greifer | 0 | MG90S | 0–90° | 0° |
 
 Winkel sind Servo-Winkel (0-180°, 90° = Servo-Mitte). `python3 test_servo.py --list`
 zeigt dieselbe Tabelle direkt aus `robot.yaml`.
