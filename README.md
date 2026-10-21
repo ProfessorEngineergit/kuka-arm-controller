@@ -400,6 +400,10 @@ wurde: [docs/omnisim-evaluation.md](docs/omnisim-evaluation.md).
 - three.js: https://threejs.org/docs/ · FastAPI: https://fastapi.tiangolo.com/
 - URDF: https://wiki.ros.org/urdf/XML
 
-**Lizenz**: MIT
+**Lizenz**: MIT (bisherige README-Angabe, beibehalten). In diesem Branch fehlt die vollständige `LICENSE`-Datei; sie muss vom Maintainer ergänzt werden.
 
 **Letztes Update**: September 2026
+
+## Entwicklung und KI-Beteiligung
+
+Die Historie des Hauptbranches enthält ausdrücklich Claude zugeschriebene Beiträge ([Beispiel](https://github.com/ProfessorEngineergit/kuka-arm-controller/commit/0f97940a7c5c0207ef1a4d369720d465f954a46a)). Das belegt KI-Beteiligung an diesen Beiträgen, nicht die Herkunft jeder Zeile oder eine unabhängige Prüfung. Bestehende Autor-, Co-Autoren- und Sitzungsangaben bleiben erhalten.
